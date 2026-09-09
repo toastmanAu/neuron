@@ -1,12 +1,16 @@
-import { bytes, Uint64LE } from '@ckb-lumos/lumos/codec'
-import { serializeWitnessArgs } from './serialization'
-import { CKBHasher } from '@ckb-lumos/lumos/utils'
-import { hd } from '@ckb-lumos/lumos'
+import Secp256k1LockProvider from '../services/lock-providers/secp256k1'
+import { StructuredWitness } from '../services/lock-providers/types'
+import SystemScriptInfo from '../models/system-script-info'
 
-type StructuredWitness = CKBComponents.WitnessArgs | CKBComponents.Witness
-
-// https://github.com/nervosnetwork/ckb-system-scripts/wiki/How-to-sign-transaction#signing
-export const signWitnesses = ({
+/**
+ * Sign a lock group with the secp256k1 sighash-all convention.
+ *
+ * The algorithm itself now lives in {@link Secp256k1LockProvider}; this remains as a thin wrapper so
+ * that there is exactly one implementation of the signing message and witness layout in the tree.
+ *
+ * https://github.com/nervosnetwork/ckb-system-scripts/wiki/How-to-sign-transaction#signing
+ */
+export const signWitnesses = async ({
   witnesses,
   transactionHash,
   privateKey,
@@ -14,7 +18,7 @@ export const signWitnesses = ({
   witnesses: StructuredWitness[]
   transactionHash: string
   privateKey: string
-}): StructuredWitness[] => {
+}): Promise<StructuredWitness[]> => {
   if (witnesses.length === 0) {
     throw new Error('witnesses cannot be empty')
   }
@@ -22,25 +26,15 @@ export const signWitnesses = ({
     throw new Error('The first witness in the group should be type of WitnessArgs')
   }
 
-  const emptyWitness = {
-    ...witnesses[0],
-    lock: `0x${'00'.repeat(65)}`,
+  const provider = new Secp256k1LockProvider()
+  // The group's lock script is not part of the secp signing message; a representative script is
+  // enough to satisfy the provider's context. Callers that know the real lock should use the
+  // provider directly.
+  const context = {
+    transactionHash,
+    lockScript: SystemScriptInfo.generateSecpScript('0x'),
+    witnesses,
   }
-  const serializedEmptyWitnessBytes = bytes.bytify(serializeWitnessArgs(emptyWitness))
-  const serializedEmptyWitnessSize = serializedEmptyWitnessBytes.byteLength
-
-  const hasher = new CKBHasher()
-  hasher.update(transactionHash)
-  hasher.update(Uint64LE.pack(serializedEmptyWitnessSize))
-  hasher.update(serializedEmptyWitnessBytes)
-
-  witnesses.slice(1).forEach(witness => {
-    const witnessBytes = bytes.bytify(typeof witness === 'string' ? witness : serializeWitnessArgs(witness))
-    hasher.update(Uint64LE.pack(witnessBytes.byteLength))
-    hasher.update(witnessBytes)
-  })
-  const message = hasher.digestHex()
-
-  emptyWitness.lock = hd.key.signRecoverable(message, privateKey)
-  return [serializeWitnessArgs(emptyWitness), ...witnesses.slice(1)]
+  const signature = await provider.sign(context, { type: 'private-key', privateKey })
+  return [await provider.finalizeWitness(context, signature), ...witnesses.slice(1)]
 }

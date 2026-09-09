@@ -207,6 +207,8 @@ import {
   NoMatchAddressForSign,
 } from '../../../src/exceptions'
 import TransactionSender from '../../../src/services/transaction-sender'
+import LockProviderRegistry from '../../../src/services/lock-providers/registry'
+import Secp256k1LockProvider from '../../../src/services/lock-providers/secp256k1'
 import MultisigConfigModel from '../../../src/models/multisig-config'
 import Multisig from '../../../src/models/multisig'
 import { addressToScript } from '../../../src/utils/scriptAndAddress'
@@ -407,6 +409,26 @@ describe('TransactionSender Test', () => {
           const ntx = await transactionSender.sign(fakeWallet.id, tx, '1234', false)
 
           expect(ntx.witnesses[0]).toEqual(tx.witnesses[0])
+        })
+
+        it('routes the signature through the lock provider rather than an inlined secp routine', async () => {
+          // Proves the provider boundary is load bearing: a registry whose secp provider finalises
+          // to a sentinel must make that sentinel appear in the signed transaction. If the sender
+          // still signed inline, the real signature would come out instead.
+          const sentinel = `0x${'ab'.repeat(32)}`
+          const stubProvider = new Secp256k1LockProvider()
+          stubProvider.finalizeWitness = async () => sentinel
+
+          const registry = new LockProviderRegistry()
+          registry.register(stubProvider)
+
+          const sender = new TransactionSender(registry)
+          sender.getPrivateKeys = mockGetPk.bind(sender)
+          sender.getAddressInfos = mockGAI.bind(sender)
+
+          const ntx = await sender.sign(fakeWallet.id, tx, '1234', false)
+
+          expect(ntx.witnesses[0]).toEqual(sentinel)
         })
       })
 

@@ -16,8 +16,8 @@ describe('sign witness', () => {
     '0x5500000010000000550000005500000041000000aa6de884b0dd0378383cedddc39790b5cad66e42d5dc7655de728ee7eb3a53be071605d76641ad26766c6ed4864e67dbc2cd1526e006c9be7ccfa9b8cbf9e7c701',
   ]
 
-  it('success', () => {
-    const newWitness = signWitnesses({
+  it('success', async () => {
+    const newWitness = await signWitnesses({
       privateKey,
       witnesses: [witness],
       transactionHash: txHash,

@@ -19,7 +19,13 @@ import Script from '../models/chain/script'
 import Multisig from '../models/multisig'
 import Blake2b from '../models/blake2b'
 import logger from '../utils/logger'
-import { signWitnesses } from '../utils/signWitnesses'
+import {
+  getDefaultLockProviderRegistry,
+  LockProviderRegistry,
+  Secp256k1LockProvider,
+  SigningContext,
+  StructuredWitness,
+} from './lock-providers'
 import { bytes, Uint64LE } from '@ckb-lumos/lumos/codec'
 import SystemScriptInfo from '../models/system-script-info'
 import AddressParser from '../models/address-parser'
@@ -66,8 +72,11 @@ export default class TransactionSender {
 
   private walletService: WalletService
 
-  constructor() {
+  private lockProviders: LockProviderRegistry
+
+  constructor(lockProviders: LockProviderRegistry = getDefaultLockProviderRegistry()) {
     this.walletService = WalletService.getInstance()
+    this.lockProviders = lockProviders
   }
 
   public async sendTx(
@@ -196,10 +205,28 @@ export default class TransactionSender {
 
     const lockHashes = new Set(witnessSigningEntries.map(w => w.lockHash))
 
+    // Software signing is routed through the secp256k1 sighash-all provider, selected explicitly by
+    // id rather than resolved from the input's lock script. That is deliberate and must not be
+    // "tightened" into a `supports()` check without a matching change to key resolution: this path
+    // also signs anyone-can-pay, cheque and sUDT-ACP inputs, which carry different code hashes but
+    // use the same secp sighash-all witness convention. Gating on script identity here would stop
+    // asset-account transactions from being signed. Provider-per-script resolution arrives with the
+    // script-identity work, together with the identity records that say which provider owns a lock.
+    const lockProvider = this.lockProviders.getOrThrow(Secp256k1LockProvider.ID)
+
     for (const lockHash of lockHashes) {
       const witnessesArgs = witnessSigningEntries.filter(w => w.lockHash === lockHash)
+      const lockScript = tx.inputs.find(input => input.lockHash === lockHash)!.lock!
+      const signingContextOf = (witnesses: StructuredWitness[]): SigningContext => ({
+        transactionHash: txHash,
+        lockScript,
+        witnesses,
+      })
+
       // A 65-byte empty signature used as placeholder
-      witnessesArgs[0].witnessArgs.setEmptyLock()
+      witnessesArgs[0].witnessArgs = WitnessArgs.fromObject(
+        await lockProvider.prepareWitness(signingContextOf([witnessesArgs[0].witnessArgs.toSDK()]))
+      )
 
       let privateKey = ''
       try {
@@ -264,16 +291,16 @@ export default class TransactionSender {
         wit.lock = serializedMultisig + wit.lock!.slice(2)
         signed[0] = serializeWitnessArgs(wit.toSDK())
       } else {
-        signed = signWitnesses({
-          privateKey,
-          transactionHash: txHash,
-          witnesses: serializedWitnesses.map(wit => {
+        const signingContext = signingContextOf(
+          serializedWitnesses.map(wit => {
             if (typeof wit === 'string') {
               return wit
             }
             return wit.toSDK()
-          }),
-        })
+          })
+        )
+        const signature = await lockProvider.sign(signingContext, { type: 'private-key', privateKey })
+        signed = [await lockProvider.finalizeWitness(signingContext, signature), ...signingContext.witnesses.slice(1)]
       }
 
       for (let i = 0; i < witnessesArgs.length; ++i) {
