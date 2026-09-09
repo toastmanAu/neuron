@@ -31,6 +31,13 @@ export interface WalletProperties {
   device?: DeviceInfo
   keystore?: hd.Keystore
   startBlockNumber?: string
+  /**
+   * Lock provider backing this wallet, when it is not a legacy secp wallet.
+   *
+   * Absent on every wallet written by an earlier Neuron, which is what keeps those wallets on the
+   * original signing path untouched.
+   */
+  lockProviderId?: string
 }
 
 export abstract class Wallet {
@@ -40,9 +47,10 @@ export abstract class Wallet {
   protected extendedKey: string = ''
   protected isHD: boolean
   protected startBlockNumber?: string
+  protected lockProviderId?: string
 
   constructor(props: WalletProperties) {
-    const { id, name, extendedKey, device, isHDWallet, startBlockNumber } = props
+    const { id, name, extendedKey, device, isHDWallet, startBlockNumber, lockProviderId } = props
 
     if (id === undefined) {
       throw new IsRequired('ID')
@@ -51,7 +59,7 @@ export abstract class Wallet {
       throw new IsRequired('Name')
     }
 
-    if (!extendedKey && !device) {
+    if (!extendedKey && !device && !lockProviderId) {
       throw new IsRequired('Extended Public Key or Device Info')
     }
 
@@ -61,6 +69,17 @@ export abstract class Wallet {
     this.device = device
     this.isHD = isHDWallet ?? true
     this.startBlockNumber = startBlockNumber
+    this.lockProviderId = lockProviderId
+  }
+
+  /**
+   * The lock provider that owns this wallet's scripts, or undefined for legacy secp wallets.
+   *
+   * Read before signing so that a wallet with no provider never touches provider-backed code, and
+   * in particular never incurs a database lookup it did not need before.
+   */
+  public getLockProviderId = (): string | undefined => {
+    return this.lockProviderId
   }
 
   public toJSON = () => ({
@@ -70,6 +89,7 @@ export abstract class Wallet {
     device: this.device,
     isHD: this.isHD,
     startBlockNumber: this.startBlockNumber,
+    lockProviderId: this.lockProviderId,
   })
 
   public fromJSON = () => {
@@ -161,6 +181,7 @@ export class FileKeystoreWallet extends Wallet {
       device: this.device,
       isHD: this.isHD,
       startBlockNumber: this.startBlockNumber,
+      lockProviderId: this.lockProviderId,
     }
   }
 

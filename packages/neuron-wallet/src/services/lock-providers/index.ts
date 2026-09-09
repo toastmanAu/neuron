@@ -1,9 +1,11 @@
 import LockProviderRegistry from './registry'
 import Secp256k1LockProvider from './secp256k1'
+import SlhDsaLockProvider from './slh-dsa/provider'
 
 export * from './types'
 export { default as LockProviderRegistry } from './registry'
 export { default as Secp256k1LockProvider } from './secp256k1'
+export { default as SlhDsaLockProvider } from './slh-dsa/provider'
 
 let defaultRegistry: LockProviderRegistry | undefined
 
@@ -23,6 +25,7 @@ export const getDefaultLockProviderRegistry = (): LockProviderRegistry => {
   if (!defaultRegistry) {
     defaultRegistry = new LockProviderRegistry()
     defaultRegistry.register(new Secp256k1LockProvider())
+    defaultRegistry.register(new SlhDsaLockProvider())
   }
   return defaultRegistry
 }

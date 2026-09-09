@@ -50,6 +50,10 @@ import { SignStatus } from '../models/offline-sign'
 import NetworksService from './networks'
 import { generateRPC } from '../utils/ckb-rpc'
 import CellsService from './cells'
+import ScriptIdentityService from './script-identities'
+import ScriptIdentityModel from '../models/script-identity'
+import resolveInputsForSigning from './tx/resolve-inputs'
+import { getDefaultSecretSourceRegistry, SecretSourceRegistry } from './secret-sources'
 import { hd } from '@ckb-lumos/lumos'
 import { getClusterByOutPoint } from '@spore-sdk/core'
 import CellDep, { DepType } from '../models/chain/cell-dep'
@@ -74,9 +78,15 @@ export default class TransactionSender {
 
   private lockProviders: LockProviderRegistry
 
-  constructor(lockProviders: LockProviderRegistry = getDefaultLockProviderRegistry()) {
+  private secretSources: SecretSourceRegistry
+
+  constructor(
+    lockProviders: LockProviderRegistry = getDefaultLockProviderRegistry(),
+    secretSources: SecretSourceRegistry = getDefaultSecretSourceRegistry()
+  ) {
     this.walletService = WalletService.getInstance()
     this.lockProviders = lockProviders
+    this.secretSources = secretSources
   }
 
   public async sendTx(
@@ -153,6 +163,13 @@ export default class TransactionSender {
         }
         throw new SignTransactionFailed(err.message)
       }
+    }
+
+    // Only a wallet that declares a lock provider takes the provider path. Deciding this from the
+    // wallet rather than by looking for stored identities matters: a database query here would add
+    // a failure mode to signing for every legacy secp wallet, which have no provider and never did.
+    if (wallet.getLockProviderId?.()) {
+      return this.signWithLockProviders(walletID, tx, txHash, password, skipLastInputs, context)
     }
 
     // Only one multi sign input now.
@@ -305,6 +322,108 @@ export default class TransactionSender {
 
       for (let i = 0; i < witnessesArgs.length; ++i) {
         witnessesArgs[i].witness = signed[i] as string
+      }
+    }
+
+    tx.witnesses = witnessSigningEntries.map(w => w.witness)
+    tx.hash = txHash
+
+    return tx
+  }
+
+  /**
+   * Sign a transaction whose inputs are guarded by provider-backed locks.
+   *
+   * Structurally similar to the secp path, with two differences that come from the locks rather
+   * than from preference:
+   *
+   * - Input cells are resolved from the node first. Locks such as the FIPS 205 one sign a message
+   *   committing to the contents of every input cell, which the transaction alone does not carry.
+   * - There is no "unrecognised lock, continue anyway" dialog. That escape hatch exists on the secp
+   *   path because args conventions can match a lock this wallet did not record; here a lock either
+   *   belongs to a stored identity or it is not ours, and signing it anyway is never right.
+   */
+  private async signWithLockProviders(
+    walletID: string,
+    tx: Transaction,
+    txHash: string,
+    password: string,
+    skipLastInputs: boolean,
+    context?: RPC.RawTransaction[]
+  ): Promise<Transaction> {
+    const identities: ScriptIdentityModel[] = await ScriptIdentityService.getByWalletId(walletID)
+    if (identities.length === 0) {
+      throw new NoMatchAddressForSign()
+    }
+
+    const network = NetworksService.getInstance().getCurrent()
+    // `context` is the previous-transaction bundle Neuron already exports for offline signing, so an
+    // offline signer resolves inputs from the file instead of needing a node.
+    const resolvedInputs = await resolveInputsForSigning(tx, network, context)
+
+    const witnessSigningEntries: SignInfo[] = tx.inputs
+      .slice(0, skipLastInputs ? -1 : tx.inputs.length)
+      .map((input: Input, index: number) => {
+        const wit: WitnessArgs | string = tx.witnesses[index]
+        return {
+          witnessArgs: wit instanceof WitnessArgs ? wit : WitnessArgs.generateEmpty(),
+          lockHash: input.lockHash!,
+          witness: '',
+          lockArgs: input.lock!.args!,
+        }
+      })
+
+    const identityByLockHash = new Map(identities.map(identity => [identity.lockHash(), identity]))
+
+    for (const lockHash of new Set(witnessSigningEntries.map(w => w.lockHash))) {
+      const group = witnessSigningEntries.filter(w => w.lockHash === lockHash)
+      const identity = identityByLockHash.get(lockHash)
+      if (!identity) {
+        throw new UnrecognizedLockScript(
+          `No stored identity claims the lock script of input group ${lockHash}, so it cannot be signed`
+        )
+      }
+
+      const provider = this.lockProviders.getOrThrow(identity.providerId)
+      const metadata = identity.metadata ?? undefined
+
+      group[0].witnessArgs = WitnessArgs.fromObject(
+        await provider.prepareWitness({
+          transactionHash: txHash,
+          lockScript: identity.lockScript(),
+          metadata,
+          witnesses: [group[0].witnessArgs.toSDK()],
+          resolvedInputs,
+        })
+      )
+
+      const serializedWitnesses: StructuredWitness[] = group.map((value: SignInfo, index: number) => {
+        const args = value.witnessArgs
+        if (index === 0) {
+          return args.toSDK()
+        }
+        if (args.lock === undefined && args.inputType === undefined && args.outputType === undefined) {
+          return '0x'
+        }
+        return serializeWitnessArgs(args.toSDK())
+      })
+
+      const signingContext: SigningContext = {
+        transactionHash: txHash,
+        lockScript: identity.lockScript(),
+        metadata,
+        witnesses: serializedWitnesses,
+        resolvedInputs,
+      }
+
+      const secret = await this.secretSources.getOrThrow(identity.providerId)(walletID, password)
+      const signature = await provider.sign(signingContext, secret)
+      const finalized = await provider.finalizeWitness(signingContext, signature)
+
+      group[0].witness = finalized
+      for (let i = 1; i < group.length; ++i) {
+        const witness = serializedWitnesses[i]
+        group[i].witness = typeof witness === 'string' ? witness : serializeWitnessArgs(witness)
       }
     }
 

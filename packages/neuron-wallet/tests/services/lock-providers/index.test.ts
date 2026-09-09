@@ -37,11 +37,11 @@ describe('default lock provider registry', () => {
     expect(getDefaultLockProviderRegistry()).toBe(getDefaultLockProviderRegistry())
   })
 
-  it('ships exactly one built-in provider in this release', () => {
+  it('ships exactly the built-in providers of this release', () => {
     expect(
       getDefaultLockProviderRegistry()
         .list()
         .map(p => p.id)
-    ).toEqual([Secp256k1LockProvider.ID])
+    ).toEqual([Secp256k1LockProvider.ID, 'slh-dsa-fips205'])
   })
 })
