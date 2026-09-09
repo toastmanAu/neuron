@@ -1,6 +1,7 @@
 import Script from '../../models/chain/script'
 import CellDep from '../../models/chain/cell-dep'
 import { Network } from '../../models/network'
+import { ResolvedInput } from '../../models/ckb-tx-message-all'
 
 /**
  * One witness slot of a lock group, in the shape the transaction sender already uses: the first
@@ -31,9 +32,20 @@ export interface PublicIdentity {
  * signing backends (hardware, encrypted PQ vault) can be added without widening the private-key
  * shape. Secret material is created inside the wallet process and is never returned to the renderer.
  */
-export type SecretMaterial = PrivateKeySecret | { readonly type: string }
+/**
+ * Provider-defined secret material, discriminated by `type`.
+ *
+ * Deliberately open: the shape a lock needs is the lock's business, and enumerating every provider's
+ * secret here would couple this interface to each of them. Providers narrow with a type guard and
+ * must validate what they receive — this crosses a trust boundary, so runtime checking is required
+ * regardless of what the type says.
+ */
+export interface SecretMaterial {
+  readonly type: string
+  readonly [field: string]: unknown
+}
 
-export interface PrivateKeySecret {
+export interface PrivateKeySecret extends SecretMaterial {
   readonly type: 'private-key'
   readonly privateKey: string
 }
@@ -55,6 +67,15 @@ export interface WitnessSizeContext {
 export interface SigningContext extends WitnessSizeContext {
   readonly transactionHash: string
   readonly witnesses: readonly StructuredWitness[]
+  /**
+   * The cell each input spends, in input order.
+   *
+   * Optional because secp sighash-all does not need it: that message is computed from the
+   * transaction hash alone. Locks whose signing message commits to input contents — the FIPS 205
+   * lock's `CKB_TX_MESSAGE_ALL` among them — require it and must refuse to sign without it rather
+   * than hash an incomplete transaction.
+   */
+  readonly resolvedInputs?: readonly ResolvedInput[]
 }
 
 /**

@@ -2,6 +2,7 @@ import { blake2b } from '@noble/hashes/blake2.js'
 import { bytes } from '@ckb-lumos/lumos/codec'
 import { serializeOutput } from '../utils/serialization'
 import Script from './chain/script'
+import { readWitnessArgsSlices } from './chain/witness-args-molecule'
 
 /** Blake2b personalisation the FIPS 205 lock hashes its signing message under. */
 export const CKB_TX_MESSAGE_ALL_PERSONAL = 'ckb-sphincs+-msg'
@@ -27,47 +28,6 @@ export interface CkbTxMessageAllParams {
   witnesses: readonly string[]
   /** Index of any input belonging to the script group being signed. */
   scriptGroupIndex: number
-}
-
-const WITNESS_ARGS_FIELD_COUNT = 3
-const WITNESS_ARGS_HEADER_SIZE = 4 + WITNESS_ARGS_FIELD_COUNT * 4
-
-interface WitnessArgsSlices {
-  lock: Uint8Array
-  inputType: Uint8Array
-  outputType: Uint8Array
-}
-
-/**
- * Split a serialized `WitnessArgs` into the raw molecule slice of each field.
- *
- * Deliberately not `WitnessArgs.deserialize`: that maps an empty field to `undefined`, which erases
- * the difference between a `BytesOpt` that is absent (0 bytes on the wire) and one that is present
- * but empty (4 bytes). Those two produce different signing messages, so the distinction has to
- * survive.
- */
-const readWitnessArgsSlices = (witness: string): WitnessArgsSlices => {
-  const buffer = bytes.bytify(witness)
-  if (buffer.byteLength < WITNESS_ARGS_HEADER_SIZE) {
-    throw new Error('The first witness of the script group is not a valid WitnessArgs: too short')
-  }
-
-  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
-  const fullSize = view.getUint32(0, true)
-  const offsets = [view.getUint32(4, true), view.getUint32(8, true), view.getUint32(12, true)]
-
-  if (fullSize !== buffer.byteLength || offsets[0] !== WITNESS_ARGS_HEADER_SIZE) {
-    throw new Error('The first witness of the script group is not a valid WitnessArgs: bad header')
-  }
-  if (offsets[1] < offsets[0] || offsets[2] < offsets[1] || fullSize < offsets[2]) {
-    throw new Error('The first witness of the script group is not a valid WitnessArgs: bad offsets')
-  }
-
-  return {
-    lock: buffer.slice(offsets[0], offsets[1]),
-    inputType: buffer.slice(offsets[1], offsets[2]),
-    outputType: buffer.slice(offsets[2], fullSize),
-  }
 }
 
 const uint32LE = (value: number): Uint8Array => {
