@@ -16,6 +16,7 @@ export * from './nft'
 export * from './multisig'
 export * from './cellManage'
 export * from './slhDsaWallets'
+export * from './fiber'
 
 const REMOTE_MODULE_NOT_FOUND =
   'The remote module is not found, please make sure the UI is running inside the Electron App'

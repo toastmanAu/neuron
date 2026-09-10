@@ -27,7 +27,8 @@
       "update-neuron-with-ckb": "The version of the CKB node does not match Neuron (v{{ version }}), which may cause compatibility issues. Please update to the latest version of Neuron.",
       "learn-more": "Learn More",
       "ckb-node-compatible": "CKB node is not compatible with Neuron (v{{ version }}), please check before further operation. (<0>{{btnText}}</0>)",
-      "ckb-without-indexer": "Please add '--indexer' option to start local node"
+      "ckb-without-indexer": "Please add '--indexer' option to start local node",
+      "fiber": "Fiber"
     },
     "network-status": {
       "tooltip": {
@@ -1426,6 +1427,24 @@
         "mnemonic-note": "A quantum-resistant wallet is backed up as three BIP39 phrases: 36, 54 or 72 words depending on the parameter set. Enter them in order.",
         "password": "Password",
         "confirm": "Confirm password"
+      }
+    },
+    "fiber": {
+      "no-channels": "This node has no channels yet.",
+      "remedy": {
+        "configure": "No Fiber node is configured. Add an endpoint in settings.",
+        "check-node": "The Fiber node is not answering. Check that it is running and the address is right.",
+        "check-token": "The Fiber node rejected the credential. Check the auth token in settings."
+      },
+      "endpoint": {
+        "title": "Fiber node",
+        "url": "Node address",
+        "token": "Auth token",
+        "token-optional": "Only needed if the node requires one.",
+        "token-held": "A token is stored. Leave blank to keep it.",
+        "save": "Save",
+        "clear": "Remove",
+        "failed": "Could not save the endpoint"
       }
     }
   }

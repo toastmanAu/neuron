@@ -33,6 +33,7 @@ const menuItems = [
     children: [
       { name: 'navbar.special-assets', key: RoutePath.SpecialAssets, url: RoutePath.SpecialAssets },
       { name: 'navbar.s-udt', key: RoutePath.SUDTAccountList, url: RoutePath.SUDTAccountList },
+      { name: 'navbar.fiber', key: RoutePath.Fiber, url: RoutePath.Fiber },
     ],
   },
 ]

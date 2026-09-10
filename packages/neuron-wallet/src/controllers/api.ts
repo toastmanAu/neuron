@@ -29,6 +29,7 @@ import { ResponseCode, UDTType } from '../utils/const'
 import { clean as cleanChain } from '../database/chain'
 import WalletsController from '../controllers/wallets'
 import SlhDsaWalletsController from './slh-dsa-wallets'
+import FiberController from './fiber'
 import TransactionsController from '../controllers/transactions'
 import DaoController from '../controllers/dao'
 import NetworksController from '../controllers/networks'
@@ -77,6 +78,7 @@ export default class ApiController {
   #walletsController = new WalletsController()
 
   #slhDsaWalletsController = new SlhDsaWalletsController()
+  #fiberController = new FiberController()
   #transactionsController = new TransactionsController()
   #daoController = new DaoController()
   #networksController = new NetworksController()
@@ -402,6 +404,22 @@ export default class ApiController {
     handle('import-slh-dsa-watch-only', async (_, params: Controller.ImportSlhDsaWatchOnlyParams) => {
       return this.#slhDsaWalletsController.importWatchOnly(params)
     })
+    // Fiber. Neuron points at a node it does not run; the node stays the authority on state.
+    handle('fiber-get-endpoint', async () => this.#fiberController.getEndpoint())
+    handle('fiber-set-endpoint', async (_, params: { url: string; token?: string }) =>
+      this.#fiberController.setEndpoint(params)
+    )
+    handle('fiber-clear-endpoint', async () => this.#fiberController.clearEndpoint())
+    handle('fiber-status', async () => this.#fiberController.getStatus())
+    handle('fiber-list-channels', async () => this.#fiberController.listChannels())
+    handle('fiber-list-peers', async () => this.#fiberController.listPeers())
+    handle('fiber-new-invoice', async (_, params: { amount: string; description?: string }) =>
+      this.#fiberController.newInvoice(params)
+    )
+    handle('fiber-send-payment', async (_, params: { invoice?: string; targetPubkey?: string; amount?: string }) =>
+      this.#fiberController.sendPayment(params)
+    )
+    handle('fiber-get-payment', async (_, params: { paymentHash: string }) => this.#fiberController.getPayment(params))
 
     handle('get-current-wallet', async () => {
       return this.#walletsController.getCurrent()

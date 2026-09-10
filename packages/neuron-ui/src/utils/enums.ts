@@ -21,6 +21,7 @@ export enum RoutePath {
   ImportWallet = '/wallets/import',
   CreateSlhDsaWallet = '/wallets/new-quantum-resistant',
   ImportSlhDsaWallet = '/wallets/import-quantum-resistant',
+  Fiber = '/fiber',
   ImportKeystore = '/keystore/import',
   NetworkEditor = '/network',
   Prompt = '/prompt',

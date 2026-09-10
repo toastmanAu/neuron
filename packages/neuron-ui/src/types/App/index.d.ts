@@ -411,6 +411,30 @@ declare namespace State {
     locked: boolean
     password: string
   }
+
+  interface FiberStatus {
+    configured: boolean
+    healthy: boolean
+    version?: string
+    pubkey?: string
+    chainHash?: string
+    channelCount?: number
+    peersCount?: number
+    error?: string
+  }
+
+  interface FiberChannel {
+    channelId: string
+    peerPubkey: string
+    stateName: string
+    localBalance: string
+    remoteBalance: string
+    isPublic: boolean
+    isAcceptor: boolean
+    enabled: boolean
+    channelOutpoint: string | null
+    ready: boolean
+  }
 }
 
 declare namespace CustomRouter {

@@ -8,6 +8,7 @@ import Overview from 'components/Overview'
 import WalletWizard from 'components/WalletWizard'
 import CreateSlhDsaWalletPage from 'components/CreateSlhDsaWallet/page'
 import ImportSlhDsaWalletPage from 'components/ImportSlhDsaWallet/page'
+import FiberPanel from 'components/FiberStatus'
 import ImportKeystore from 'components/ImportKeystore'
 import Send from 'components/Send'
 import History from 'components/History'
@@ -294,6 +295,16 @@ const mainRouterConfig: RouteObject[] = [
         element: (
           <>
             <ImportHardware />
+            <Outlet />
+          </>
+        ),
+        children: [...toolsRouters],
+      },
+      {
+        path: RoutePath.Fiber,
+        element: (
+          <>
+            <FiberPanel />
             <Outlet />
           </>
         ),
