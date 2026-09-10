@@ -184,13 +184,29 @@ export class TransactionGenerator {
       lockArgs?: string[]
       codeHash: string
       hashType: ScriptHashType
+      /**
+       * Cell dep this lock needs, for scripts deployed outside the genesis block.
+       *
+       * Omitted for secp and multisig, whose deps are derived from genesis. Without it a
+       * provider-backed lock cannot run at all and the transaction is rejected before the
+       * signature is even considered.
+       */
+      cellDep?: CellDep
+      /**
+       * Serialized size of this lock's first witness in a script group, for fee estimation.
+       *
+       * Omitted for secp, which keeps the existing 93-byte assumption.
+       */
+      witnessSize?: number
     }
     multisigConfig?: MultisigConfigModel
     consumeOutPoints?: CKBComponents.OutPoint[]
     enableUseSentCell?: boolean
   }): Promise<Transaction> => {
     let cellDep: CellDep
-    if (SystemScriptInfo.isMultiSignCodeHash(lockClass.codeHash)) {
+    if (lockClass.cellDep) {
+      cellDep = lockClass.cellDep
+    } else if (SystemScriptInfo.isMultiSignCodeHash(lockClass.codeHash)) {
       cellDep = await SystemScriptInfo.getInstance().getMultiSignCellDep(lockClass.codeHash)
     } else {
       cellDep = await SystemScriptInfo.getInstance().getSecpCellDep()
@@ -251,7 +267,8 @@ export class TransactionGenerator {
       lockClass,
       multisigConfig ? [multisigConfig] : [],
       consumeOutPoints,
-      enableUseSentCell
+      enableUseSentCell,
+      lockClass.witnessSize
     )
     const finalFeeInt = BigInt(finalFee)
     tx.inputs = inputs

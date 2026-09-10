@@ -39,6 +39,14 @@ export default class ScriptIdentityService {
     }
   }
 
+  /** Every stored identity, across all wallets. Used by the sync layer to build its watch list. */
+  public static async getAll(): Promise<ScriptIdentityModel[]> {
+    const entities = await getConnection()
+      .getRepository(ScriptIdentityEntity)
+      .find({ order: { walletId: 'ASC', addressType: 'ASC', addressIndex: 'ASC' } })
+    return entities.map(entity => entity.toModel())
+  }
+
   public static async getByWalletId(walletId: string): Promise<ScriptIdentityModel[]> {
     const entities = await getConnection()
       .getRepository(ScriptIdentityEntity)

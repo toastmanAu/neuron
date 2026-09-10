@@ -3,6 +3,7 @@ import { type CKBComponents } from '@ckb-lumos/lumos/rpc'
 import logger from '../../utils/logger'
 import { Address } from '../../models/address'
 import AddressMeta from '../../database/address/meta'
+import providerSyncScripts from './provider-sync-scripts'
 import { scheduler } from 'timers/promises'
 import SyncProgressService from '../../services/sync-progress'
 import { Synchronizer } from './synchronizer'
@@ -202,6 +203,10 @@ export default class LightSynchronizer extends Synchronizer {
     })
     const walletMinBlockNumber = await LightSynchronizer.getWalletsSyncedMinBlockNumber()
     const currentWalletId = WalletService.getInstance().getCurrent()?.id
+    // Provider-backed locks cannot be derived from a blake160, so they come from the identity
+    // table rather than from address metadata. Empty for every wallet that is not provider backed.
+    const providerScripts = await providerSyncScripts()
+
     const allScripts = this.addressMetas
       .map(addressMeta => {
         const lockScripts = [
@@ -216,6 +221,7 @@ export default class LightSynchronizer extends Synchronizer {
         }))
       })
       .flat()
+      .concat(providerScripts)
       .filter(v => {
         return (
           !currentWalletId ||

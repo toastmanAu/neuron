@@ -31,6 +31,7 @@ import AssetAccountInfo from '../models/asset-account-info'
 import NFT from '../models/nft'
 import MultisigConfigModel from '../models/multisig-config'
 import MultisigOutput from '../database/chain/entities/multisig-output'
+import ScriptIdentityService from './script-identities'
 import { bytes } from '@ckb-lumos/lumos/codec'
 import { generateRPC } from '../utils/ckb-rpc'
 import { getClusterById, SporeData, unpackToRawClusterData } from '@spore-sdk/core'
@@ -582,6 +583,11 @@ export default class CellsService {
       .getMany()
     const blake160s = hdPublicKeyInfos.map(v => v.publicKeyInBlake160)
     const multisigArgs = hdPublicKeyInfos.map(v => Multisig.hash([v.publicKeyInBlake160]))
+    // Provider-backed identities have no blake160, so they are matched on the full lock hash — exact
+    // and collision-free, unlike matching args across different code hashes.
+    const identityLockHashes = (await ScriptIdentityService.getByWalletId(walletId)).map(identity =>
+      identity.lockHash()
+    )
     // find all outputs except cheque
     const outputs = await getConnection()
       .getRepository(OutputEntity)
@@ -594,6 +600,9 @@ export default class CellsService {
       .andWhere(
         new Brackets(qb => {
           qb.where({ lockArgs: In(blake160s) }).orWhere({ multiSignBlake160: In(multisigArgs) })
+          if (identityLockHashes.length) {
+            qb.orWhere({ lockHash: In(identityLockHashes) })
+          }
         })
       )
       .getMany()
@@ -673,7 +682,16 @@ export default class CellsService {
     } = { codeHash: SystemScriptInfo.SECP_CODE_HASH, hashType: ScriptHashType.Type },
     multisigConfigs: MultisigConfigModel[] = [],
     consumeOutPoints?: CKBComponents.OutPoint[],
-    enableUseSentCell?: boolean
+    enableUseSentCell?: boolean,
+    /**
+     * Serialized size of this lock's first witness in a script group.
+     *
+     * Omitted for secp, which is what every existing caller does, so the default is unchanged. A
+     * provider-backed lock must pass its own: an SLH-DSA witness is 7,921 to 49,953 bytes against
+     * secp's 93, and pricing it as secp under-pays the fee by tens of kilobytes' worth — the pool
+     * then rejects the transaction for being below the minimum fee rate.
+     */
+    lockWitnessSize?: number
   ): Promise<{
     inputs: Input[]
     capacities: string
@@ -781,7 +799,7 @@ export default class CellsService {
           }
           totalSize += TransactionSize.multiSignWitness(multisigConfig.r, multisigConfig.m, multisigConfig.n)
         } else {
-          totalSize += TransactionSize.secpLockWitness()
+          totalSize += lockWitnessSize ?? TransactionSize.secpLockWitness()
         }
       }
       inputs.push(input)

@@ -635,6 +635,41 @@ export default class TransactionSender {
     return [emptyWitness, ...restWitnesses]
   }
 
+  /**
+   * Everything a provider-backed lock needs before a transaction can be built for it.
+   *
+   * The lock is deployed per network under a different code hash, so an identity is only usable on
+   * the network it was derived for; a mismatch is refused rather than silently producing a
+   * transaction against a script that does not exist here.
+   */
+  private async resolveProviderLockClass(walletID: string, providerId: string) {
+    const network = NetworksService.getInstance().getCurrent()
+    const identities = await ScriptIdentityService.getByWalletId(walletID)
+    const provider = this.lockProviders.getOrThrow(providerId)
+
+    const identity = identities.find(candidate => provider.supports(candidate.lockScript(), network))
+    if (!identity) {
+      throw new Error(
+        `This wallet has no ${providerId} identity for the current network. Its lock is deployed separately on each network, so an identity derived elsewhere cannot be used here.`
+      )
+    }
+
+    const [cellDep] = await provider.getCellDeps(network)
+    return {
+      changeAddress: identity.address,
+      lockClass: {
+        codeHash: identity.lockCodeHash,
+        hashType: identity.lockHashType,
+        lockArgs: [identity.lockArgs],
+        cellDep,
+        witnessSize: provider.estimateWitnessSize({
+          lockScript: identity.lockScript(),
+          metadata: identity.metadata ?? undefined,
+        }),
+      },
+    }
+  }
+
   public generateTx = async ({
     walletID = '',
     items = [],
@@ -654,6 +689,21 @@ export default class TransactionSender {
       ...item,
       capacity: BigInt(item.capacity).toString(),
     }))
+
+    const providerId = this.walletService.get(walletID).getLockProviderId?.()
+    if (providerId) {
+      const { changeAddress, lockClass } = await this.resolveProviderLockClass(walletID, providerId)
+      return TransactionGenerator.generateTx({
+        walletID,
+        targetOutputs,
+        changeAddress,
+        fee,
+        feeRate,
+        lockClass,
+        consumeOutPoints,
+        enableUseSentCell,
+      })
+    }
 
     const changeAddress: string = await this.getChangeAddress()
 
