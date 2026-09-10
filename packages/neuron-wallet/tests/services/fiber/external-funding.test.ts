@@ -2,6 +2,8 @@ import 'dotenv/config'
 import FiberExternalFundingService, {
   ownedInputIndices,
   withFundingTxWitnesses,
+  fundingFeeRateForWitnessSize,
+  MIN_ASSUMED_FUNDING_TX_SIZE,
 } from '../../../src/services/fiber/external-funding'
 import { FundingStructureChanged } from '../../../src/services/fiber/funding-structure'
 import Script, { ScriptHashType } from '../../../src/models/chain/script'
@@ -140,6 +142,68 @@ describe('FiberExternalFundingService', () => {
       ])
     })
 
+    it('prices the funding transaction for the witness this wallet will supply', async () => {
+      // Left to the node's own estimate, a large-witness lock produces a transaction the node
+      // believes is paid for and the pool rejects. Supplying the witness size is enough for the
+      // service to raise the one lever the protocol offers.
+      const client = clientFor({
+        open_channel_with_external_funding: { channel_id: '0xchan', unsigned_funding_tx: unsignedTx() },
+      })
+      const service = new FiberExternalFundingService(client as never)
+
+      await service.openChannel({
+        peerPubkey: '0xpeer',
+        fundingAmount: '0x2540be400',
+        shutdownScript: OURS as never,
+        fundingLockScript: OURS as never,
+        fundingWitnessSize: 7921,
+      })
+
+      expect(client.call).toHaveBeenCalledWith('open_channel_with_external_funding', [
+        expect.objectContaining({ funding_fee_rate: fundingFeeRateForWitnessSize(7921) }),
+      ])
+    })
+
+    it('lets an explicit fee rate override the computed one', async () => {
+      const client = clientFor({
+        open_channel_with_external_funding: { channel_id: '0xchan', unsigned_funding_tx: unsignedTx() },
+      })
+      const service = new FiberExternalFundingService(client as never)
+
+      await service.openChannel({
+        peerPubkey: '0xpeer',
+        fundingAmount: '0x2540be400',
+        shutdownScript: OURS as never,
+        fundingLockScript: OURS as never,
+        fundingWitnessSize: 7921,
+        fundingFeeRate: '0x123',
+      })
+
+      expect(client.call).toHaveBeenCalledWith('open_channel_with_external_funding', [
+        expect.objectContaining({ funding_fee_rate: '0x123' }),
+      ])
+    })
+
+    it('leaves the fee rate to the node when no witness size is given', async () => {
+      // The existing secp path says nothing about witness size and must keep deferring to the
+      // node, whose estimate is correct for the lock it assumes.
+      const client = clientFor({
+        open_channel_with_external_funding: { channel_id: '0xchan', unsigned_funding_tx: unsignedTx() },
+      })
+      const service = new FiberExternalFundingService(client as never)
+
+      await service.openChannel({
+        peerPubkey: '0xpeer',
+        fundingAmount: '0x2540be400',
+        shutdownScript: OURS as never,
+        fundingLockScript: OURS as never,
+      })
+
+      expect(client.call).toHaveBeenCalledWith('open_channel_with_external_funding', [
+        expect.objectContaining({ funding_fee_rate: undefined }),
+      ])
+    })
+
     it('rejects a response without a negotiated transaction', async () => {
       const service = new FiberExternalFundingService(
         clientFor({ open_channel_with_external_funding: { channel_id: '0xchan' } }) as never
@@ -219,5 +283,67 @@ describe('FiberExternalFundingService', () => {
 
       await expect(service.submitSigned(opened, tampered)).rejects.toThrow(FundingStructureChanged)
     })
+  })
+})
+
+describe('fundingFeeRateForWitnessSize', () => {
+  // Numbers observed on testnet, 2026-09-10, opening an SLH-DSA-funded channel against a peer.
+  // The node sized the funding transaction against its own secp-shaped placeholder witness and
+  // budgeted 759 shannons; the transaction actually carrying our 7,913-byte SLH-DSA witness needed
+  // 8,587. Chain said: LowFeeRate, "requiring a transaction fee of at least 8587 shannons, but the
+  // fee provided is only 759". Those two numbers are what this function has to bridge.
+  const NODE_BUDGETED_AT_FLOOR = 759
+  const CHAIN_REQUIRED = 8587
+  const SLH_DSA_SHA2_128S_WITNESS = 7921
+
+  const feeTheNodeWouldBudget = (rateHex: string) =>
+    Math.floor((NODE_BUDGETED_AT_FLOOR * Number(BigInt(rateHex))) / 1000)
+
+  it('produces a rate that clears the fee the chain actually demanded', () => {
+    const rate = fundingFeeRateForWitnessSize(SLH_DSA_SHA2_128S_WITNESS)
+    expect(feeTheNodeWouldBudget(rate)).toBeGreaterThanOrEqual(CHAIN_REQUIRED)
+  })
+
+  it('leaves the rate at the floor when the witness costs nothing', () => {
+    expect(fundingFeeRateForWitnessSize(0)).toEqual('0x3e8')
+  })
+
+  it('barely moves for a secp-sized witness', () => {
+    // A 93-byte witness against the assumed floor size is a fraction of the transaction, so a
+    // secp-funded channel is not made materially more expensive by going through this path.
+    const rate = Number(BigInt(fundingFeeRateForWitnessSize(93)))
+    expect(rate).toBeGreaterThan(1000)
+    expect(rate).toBeLessThan(1000 * 1.2)
+  })
+
+  it('grows with the witness, so slower parameter sets pay for their size', () => {
+    const small = BigInt(fundingFeeRateForWitnessSize(7921))
+    const large = BigInt(fundingFeeRateForWitnessSize(50000))
+    expect(large).toBeGreaterThan(small)
+  })
+
+  it('honours a caller-supplied floor', () => {
+    const atDefault = BigInt(fundingFeeRateForWitnessSize(7921))
+    const atDouble = BigInt(fundingFeeRateForWitnessSize(7921, 2000))
+    expect(atDouble).toEqual(atDefault * BigInt(2))
+  })
+
+  it('returns 0x-prefixed hex, as the Fiber RPC expects', () => {
+    expect(fundingFeeRateForWitnessSize(7921)).toMatch(/^0x[0-9a-f]+$/)
+  })
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])('rejects %p as a witness size', bad => {
+    expect(() => fundingFeeRateForWitnessSize(bad)).toThrow(/witness size/i)
+  })
+
+  it('rejects a fee floor that is not a positive integer', () => {
+    expect(() => fundingFeeRateForWitnessSize(7921, 0)).toThrow(/fee rate/i)
+  })
+
+  it('assumes a funding transaction no smaller than the floor it documents', () => {
+    // The compensation is deliberately computed against a LOWER bound on transaction size: a
+    // smaller assumed base makes the resulting rate larger, so the error is always in the
+    // direction of overpaying by a fraction of a shannon-per-byte rather than under-paying.
+    expect(MIN_ASSUMED_FUNDING_TX_SIZE).toBeLessThanOrEqual(759)
   })
 })
