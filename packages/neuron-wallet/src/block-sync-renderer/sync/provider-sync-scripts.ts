@@ -1,4 +1,5 @@
 import ScriptIdentityService from '../../services/script-identities'
+import ScriptIdentity from '../../models/script-identity'
 import WalletService from '../../services/wallets'
 
 export interface ProviderSyncScript {
@@ -40,6 +41,33 @@ const providerSyncScripts = async (walletIds?: string[]): Promise<ProviderSyncSc
       scriptType: 'lock' as CKBRPC.ScriptType,
       walletId: identity.walletId,
     }))
+}
+
+/**
+ * Provider-backed identities grouped by wallet.
+ *
+ * The full-node sync path drives its indexer cache per wallet from address metadata. A
+ * provider-backed wallet has none, so it never appears in that loop and needs its own pass.
+ */
+export const providerIdentitiesByWallet = async (): Promise<Map<string, ScriptIdentity[]>> => {
+  const providerWalletIds = new Set(
+    WalletService.getInstance()
+      .getAll()
+      .filter(wallet => wallet.lockProviderId)
+      .map(wallet => wallet.id)
+  )
+  if (providerWalletIds.size === 0) {
+    return new Map()
+  }
+
+  const grouped = new Map<string, ScriptIdentity[]>()
+  for (const identity of await ScriptIdentityService.getAll()) {
+    if (!providerWalletIds.has(identity.walletId)) {
+      continue
+    }
+    grouped.set(identity.walletId, [...(grouped.get(identity.walletId) ?? []), identity])
+  }
+  return grouped
 }
 
 export default providerSyncScripts

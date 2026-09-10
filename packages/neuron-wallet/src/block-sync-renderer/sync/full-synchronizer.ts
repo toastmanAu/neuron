@@ -6,6 +6,7 @@ import { Address } from '../../models/address'
 import { Synchronizer } from './synchronizer'
 import { NetworkType } from '../../models/network'
 import IndexerCacheService from './indexer-cache-service'
+import { providerIdentitiesByWallet } from './provider-sync-scripts'
 
 export default class FullSynchronizer extends Synchronizer {
   private rpcService: RpcService
@@ -60,6 +61,14 @@ export default class FullSynchronizer extends Synchronizer {
       const txHashes = await indexerCacheService.upsertTxHashes()
       arrayOfInsertedTxHashes.push(txHashes)
     }
+
+    // Provider-backed wallets have no address metadata, so they never appear in the loop above and
+    // need their own pass. Empty for every wallet that is not provider backed.
+    for (const [walletId, identities] of await providerIdentitiesByWallet()) {
+      const indexerCacheService = new IndexerCacheService(walletId, [], this.rpcService, this.indexer, identities)
+      arrayOfInsertedTxHashes.push(await indexerCacheService.upsertTxHashes())
+    }
+
     return arrayOfInsertedTxHashes.flat()
   }
 

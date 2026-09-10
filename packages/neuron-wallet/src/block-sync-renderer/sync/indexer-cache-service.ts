@@ -1,6 +1,7 @@
 import { In } from 'typeorm'
 import { queue } from 'async'
 import AddressMeta from '../../database/address/meta'
+import ScriptIdentity from '../../models/script-identity'
 import IndexerTxHashCache from '../../database/chain/entities/indexer-tx-hash-cache'
 import RpcService from '../../services/rpc-service'
 import TransactionWithStatus from '../../models/chain/transaction-with-status'
@@ -10,20 +11,41 @@ import { TransactionCollector, Indexer as CkbIndexer, CellCollector } from '@ckb
 
 export default class IndexerCacheService {
   private addressMetas: AddressMeta[]
+
+  private scriptIdentities: ScriptIdentity[]
   private rpcService: RpcService
   private walletId: string
   private indexer: CkbIndexer
   #cacheBlockNumberEntityMap: Map<string, SyncInfoEntity> = new Map()
 
-  constructor(walletId: string, addressMetas: AddressMeta[], rpcService: RpcService, indexer: CkbIndexer) {
+  constructor(
+    walletId: string,
+    addressMetas: AddressMeta[],
+    rpcService: RpcService,
+    indexer: CkbIndexer,
+    /**
+     * Provider-backed identities for this wallet.
+     *
+     * Empty for every HD or hardware wallet, which is what leaves their sync path untouched. These
+     * cannot be expressed as an `AddressMeta`: there is no blake160 to expand into the usual family
+     * of secp, ACP and cheque scripts, and the stored identity is itself the whole lock.
+     */
+    scriptIdentities: ScriptIdentity[] = []
+  ) {
     for (const addressMeta of addressMetas) {
       if (addressMeta.walletId !== walletId) {
         throw new Error(`address ${addressMeta.address} does not belong to wallet id ${walletId}`)
       }
     }
+    for (const identity of scriptIdentities) {
+      if (identity.walletId !== walletId) {
+        throw new Error(`identity ${identity.address} does not belong to wallet id ${walletId}`)
+      }
+    }
 
     this.walletId = walletId
     this.addressMetas = addressMetas
+    this.scriptIdentities = scriptIdentities
     this.rpcService = rpcService
     this.indexer = indexer
   }
@@ -144,6 +166,30 @@ export default class IndexerCacheService {
         }
       }
     }
+
+    // Provider-backed identities: one lock each, watched whole. No blake160 expansion applies, and
+    // the sync cursor is keyed by the lock args since there is no blake160 to key it on.
+    for (const identity of this.scriptIdentities) {
+      const lastCacheBlockNumber = await this.getCachedBlockNumber(identity.lockArgs)
+      const lockScript = identity.lockScript()
+
+      const transactionCollector = new TransactionCollector(
+        this.indexer,
+        {
+          lock: { codeHash: lockScript.codeHash, hashType: lockScript.hashType, args: lockScript.args },
+          fromBlock: lastCacheBlockNumber.value,
+          toBlock: currentHeaderBlockNumber,
+        },
+        this.rpcService.url,
+        { includeStatus: false }
+      )
+
+      const fetchedTxHashes = await transactionCollector.getTransactionHashes()
+      for (const txHash of fetchedTxHashes) {
+        mappingsByTxHash.set(txHash, [{ address: identity.address, lockHash: lockScript.computeHash() }])
+      }
+    }
+
     return mappingsByTxHash
   }
 
@@ -165,9 +211,12 @@ export default class IndexerCacheService {
   }
 
   private async saveCacheBlockNumber(cacheBlockNumber: string) {
-    const entities = this.addressMetas.map(v =>
+    const entities = [
+      ...this.addressMetas.map(v => v.blake160),
+      ...this.scriptIdentities.map(identity => identity.lockArgs),
+    ].map(key =>
       SyncInfoEntity.fromObject({
-        name: SyncInfoEntity.getLastCachedKey(v.blake160),
+        name: SyncInfoEntity.getLastCachedKey(key),
         value: cacheBlockNumber,
       })
     )
