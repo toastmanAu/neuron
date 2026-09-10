@@ -392,14 +392,20 @@ export default class TransactionSender {
           transactionHash: txHash,
           lockScript: identity.lockScript(),
           metadata,
+          // A single-element list, so the group's first witness is at index 0 for this call.
           witnesses: [group[0].witnessArgs.toSDK()],
-          resolvedInputs,
+          resolvedInputs: undefined,
         })
       )
 
-      const serializedWitnesses: StructuredWitness[] = group.map((value: SignInfo, index: number) => {
-        const args = value.witnessArgs
-        if (index === 0) {
+      // The witness list handed to the provider is the transaction's, indexed by input, not the
+      // group's. A transaction can carry several script groups and a group need not start at input
+      // 0; CKB_TX_MESSAGE_ALL commits to witnesses by absolute index, so a group-relative slice
+      // would build the message over the wrong ones.
+      const groupFirstIndex = witnessSigningEntries.indexOf(group[0])
+      const absoluteWitnesses: StructuredWitness[] = witnessSigningEntries.map((entry, index) => {
+        const args = entry.witnessArgs
+        if (index === groupFirstIndex) {
           return args.toSDK()
         }
         if (args.lock === undefined && args.inputType === undefined && args.outputType === undefined) {
@@ -412,7 +418,7 @@ export default class TransactionSender {
         transactionHash: txHash,
         lockScript: identity.lockScript(),
         metadata,
-        witnesses: serializedWitnesses,
+        witnesses: absoluteWitnesses,
         resolvedInputs,
       }
 
@@ -422,7 +428,7 @@ export default class TransactionSender {
 
       group[0].witness = finalized
       for (let i = 1; i < group.length; ++i) {
-        const witness = serializedWitnesses[i]
+        const witness = absoluteWitnesses[witnessSigningEntries.indexOf(group[i])]
         group[i].witness = typeof witness === 'string' ? witness : serializeWitnessArgs(witness)
       }
     }

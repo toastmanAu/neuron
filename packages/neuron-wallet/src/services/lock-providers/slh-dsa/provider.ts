@@ -3,7 +3,7 @@ import ckbTxMessageAll from '../../../models/ckb-tx-message-all'
 import Script from '../../../models/chain/script'
 import CellDep from '../../../models/chain/cell-dep'
 import { serializeWitnessArgs } from '../../../utils/serialization'
-import { replaceWitnessArgsLock } from '../../../models/chain/witness-args-molecule'
+import { readWitnessArgsSlices, replaceWitnessArgsLock } from '../../../models/chain/witness-args-molecule'
 import { Network } from '../../../models/network'
 import {
   getDefaultScriptDeploymentRegistry,
@@ -95,14 +95,42 @@ export default class SlhDsaLockProvider implements LockProvider {
     return [this.deployments.cellDepFor(this.id, network)!]
   }
 
+  /**
+   * Index of this group's first witness within the transaction's witness list.
+   *
+   * A transaction can carry several script groups, and a group need not start at input 0. Its
+   * signature belongs in the witness at the index of its own first input; writing it to
+   * `witnesses[0]` would sign into another group's witness and leave this one unsigned.
+   *
+   * Falls back to 0 when inputs are not resolved, which is the single-group case.
+   */
+  private groupFirstIndex(context: SigningContext): number {
+    if (!context.resolvedInputs?.length) {
+      return 0
+    }
+    const index = context.resolvedInputs.findIndex(
+      input =>
+        input.lock.codeHash === context.lockScript.codeHash &&
+        input.lock.hashType === context.lockScript.hashType &&
+        input.lock.args === context.lockScript.args
+    )
+    return index < 0 ? 0 : index
+  }
+
   public async prepareWitness(context: SigningContext): Promise<CKBComponents.WitnessArgs> {
     const parameterSet = requireParameterSet(context.metadata)
-    const first: StructuredWitness | undefined = context.witnesses[0]
+    const first: StructuredWitness | undefined = context.witnesses[this.groupFirstIndex(context)]
     if (first === undefined) {
       throw new Error('Cannot prepare an SLH-DSA witness for an empty lock group')
     }
     if (typeof first === 'string') {
-      throw new Error('The first witness of an SLH-DSA lock group must be a structured WitnessArgs')
+      // Already-serialized witnesses are read at the molecule level so their other fields survive.
+      const slices = readWitnessArgsSlices(first)
+      return {
+        lock: bytes.hexify(new Uint8Array(witnessLockLength(parameterSet))),
+        inputType: slices.inputType.byteLength ? bytes.hexify(slices.inputType.slice(4)) : undefined,
+        outputType: slices.outputType.byteLength ? bytes.hexify(slices.outputType.slice(4)) : undefined,
+      }
     }
 
     // The placeholder is sized, not meaningful: the lock field is excluded from
@@ -165,7 +193,7 @@ export default class SlhDsaLockProvider implements LockProvider {
       throw new Error('Finalising an SLH-DSA witness needs the public key: the lock carries it alongside the signature')
     }
 
-    const first: StructuredWitness | undefined = context.witnesses[0]
+    const first: StructuredWitness | undefined = context.witnesses[this.groupFirstIndex(context)]
     if (first === undefined) {
       throw new Error('Cannot finalise an SLH-DSA witness for an empty lock group')
     }
