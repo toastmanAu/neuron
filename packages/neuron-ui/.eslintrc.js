@@ -65,7 +65,7 @@ module.exports = {
     'import/no-extraneous-dependencies': [
       'error',
       {
-        devDependencies: ['**/*.stories.*', 'src/setupTests.ts', '**/*.test.ts', './vitest-setup.js'],
+        devDependencies: ['**/*.stories.*', 'src/setupTests.ts', '**/*.test.ts', '**/*.test.tsx', './vitest-setup.js'],
       },
     ],
     'import/extensions': [

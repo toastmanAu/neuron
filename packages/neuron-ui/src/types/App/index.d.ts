@@ -219,6 +219,11 @@ declare namespace State {
   interface WalletIdentity {
     id: string
     name: string
+    /**
+     * Set when the wallet's addresses come from a lock provider rather than an HD derivation path.
+     * The main process has always sent this; the renderer simply never declared it.
+     */
+    lockProviderId?: string
     device?: DeviceInfo
     isHD?: boolean
     isWatchOnly?: boolean

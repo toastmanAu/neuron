@@ -28,6 +28,7 @@ import SettingsService, { Locale } from '../services/settings'
 import { ResponseCode, UDTType } from '../utils/const'
 import { clean as cleanChain } from '../database/chain'
 import WalletsController from '../controllers/wallets'
+import SlhDsaWalletsController from './slh-dsa-wallets'
 import TransactionsController from '../controllers/transactions'
 import DaoController from '../controllers/dao'
 import NetworksController from '../controllers/networks'
@@ -74,6 +75,8 @@ export type Command = 'export-xpubkey' | 'import-xpubkey' | 'delete-wallet' | 'b
 // Handle channel messages from renderer process and user actions.
 export default class ApiController {
   #walletsController = new WalletsController()
+
+  #slhDsaWalletsController = new SlhDsaWalletsController()
   #transactionsController = new TransactionsController()
   #daoController = new DaoController()
   #networksController = new NetworksController()
@@ -364,6 +367,32 @@ export default class ApiController {
 
     handle('get-all-wallets', async () => {
       return this.#walletsController.getAll()
+    })
+
+    // Quantum-resistant (SLH-DSA) wallets. Separate channels from the mnemonic/keystore ones
+    // because none of those concepts apply to a FIPS 205 key pair.
+    handle('slh-dsa-parameter-sets', async () => {
+      return this.#slhDsaWalletsController.getParameterSets()
+    })
+
+    handle('create-slh-dsa-wallet', async (_, params: Controller.CreateSlhDsaWalletParams) => {
+      return this.#slhDsaWalletsController.createWallet(params)
+    })
+
+    handle('get-slh-dsa-addresses', async (_, params: { walletID: string }) => {
+      return this.#slhDsaWalletsController.getAddresses(params)
+    })
+
+    handle('export-slh-dsa-backup', async (_, params: { walletID: string }) => {
+      return this.#slhDsaWalletsController.exportBackup(params)
+    })
+
+    handle('import-slh-dsa-backup', async (_, params: { name: string; backup: string }) => {
+      return this.#slhDsaWalletsController.importBackup(params)
+    })
+
+    handle('import-slh-dsa-watch-only', async (_, params: Controller.ImportSlhDsaWatchOnlyParams) => {
+      return this.#slhDsaWalletsController.importWatchOnly(params)
     })
 
     handle('get-current-wallet', async () => {

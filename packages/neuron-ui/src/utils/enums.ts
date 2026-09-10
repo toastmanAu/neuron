@@ -19,6 +19,8 @@ export enum RoutePath {
   SettingsData = 'data',
   CreateWallet = '/wallets/new',
   ImportWallet = '/wallets/import',
+  CreateSlhDsaWallet = '/wallets/new-quantum-resistant',
+  ImportSlhDsaWallet = '/wallets/import-quantum-resistant',
   ImportKeystore = '/keystore/import',
   NetworkEditor = '/network',
   Prompt = '/prompt',

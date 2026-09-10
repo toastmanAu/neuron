@@ -28,6 +28,12 @@ export const RemoteNotLoadError = {
 // API wrapper using Electron 7 invoke/handle
 // Action: Electron channel
 type Action =
+  | 'slh-dsa-parameter-sets'
+  | 'create-slh-dsa-wallet'
+  | 'get-slh-dsa-addresses'
+  | 'export-slh-dsa-backup'
+  | 'import-slh-dsa-backup'
+  | 'import-slh-dsa-watch-only'
   // App
   | 'get-system-codehash'
   | 'load-init-data'

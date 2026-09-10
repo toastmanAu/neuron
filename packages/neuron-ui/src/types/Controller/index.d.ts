@@ -449,4 +449,35 @@ declare namespace Controller {
       assetAccount?: AssetAccount
     }
   }
+
+  interface CreateSlhDsaWalletParams {
+    name: string
+    password: string
+    parameterSet: string
+  }
+
+  interface ImportSlhDsaWatchOnlyParams {
+    name: string
+    publicKey: string
+    parameterSet: string
+  }
+
+  interface SlhDsaAddress {
+    address: string
+    lockCodeHash: string
+    lockHashType: string
+    lockArgs: string
+    addressType: number
+    addressIndex: number
+    parameterSet?: string
+    watchOnly: boolean
+  }
+
+  interface SlhDsaParameterSetSummary {
+    name: string
+    publicKeyLength: number
+    signatureLength: number
+    witnessSize: number
+    slowSigning: boolean
+  }
 }

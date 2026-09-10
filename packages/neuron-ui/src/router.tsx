@@ -6,6 +6,8 @@ import Navbar from 'containers/Navbar'
 import { RoutePath } from 'utils'
 import Overview from 'components/Overview'
 import WalletWizard from 'components/WalletWizard'
+import CreateSlhDsaWalletPage from 'components/CreateSlhDsaWallet/page'
+import ImportSlhDsaWalletPage from 'components/ImportSlhDsaWallet/page'
 import ImportKeystore from 'components/ImportKeystore'
 import Send from 'components/Send'
 import History from 'components/History'
@@ -182,6 +184,26 @@ const mainRouterConfig: RouteObject[] = [
         element: (
           <>
             <WalletWizard />
+            <Outlet />
+          </>
+        ),
+        children: [...toolsRouters],
+      },
+      {
+        path: RoutePath.CreateSlhDsaWallet,
+        element: (
+          <>
+            <CreateSlhDsaWalletPage />
+            <Outlet />
+          </>
+        ),
+        children: [...toolsRouters],
+      },
+      {
+        path: RoutePath.ImportSlhDsaWallet,
+        element: (
+          <>
+            <ImportSlhDsaWalletPage />
             <Outlet />
           </>
         ),

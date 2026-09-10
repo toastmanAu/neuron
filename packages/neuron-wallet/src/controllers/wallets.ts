@@ -239,7 +239,8 @@ export default class WalletsController {
       startBlockNumber,
     }
 
-    if (!wallet.isHardware()) {
+    // Same exclusion as hardware: there is no keystore to carry across an update.
+    if (!wallet.isHardware() && !wallet.getLockProviderId()) {
       props.keystore = wallet.loadKeystore()
     }
 

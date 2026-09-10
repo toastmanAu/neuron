@@ -131,7 +131,11 @@ const updateApplicationMenu = (mainWindow: BrowserWindow | null) => {
   const currentWallet = walletsService.getCurrent()
   const hasCurrentWallet = currentWallet !== undefined
   const isHardwareWallet = currentWallet?.isHardware() ?? false
-  const isXpubWallet = !isHardwareWallet && currentWallet?.loadKeystore().isEmpty()
+  // A provider-backed wallet has no keystore and throws if asked for one, so it has to be excluded
+  // here as hardware wallets are. "Watch only" is an xpub-without-private-key notion that does not
+  // apply to it at all: whether it can sign is decided by whether its lock provider holds a key.
+  const isProviderWallet = Boolean(currentWallet?.getLockProviderId())
+  const isXpubWallet = !isHardwareWallet && !isProviderWallet && currentWallet?.loadKeystore().isEmpty()
 
   const appMenuItem: MenuItemConstructorOptions = {
     id: 'app',

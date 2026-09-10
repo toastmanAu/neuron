@@ -166,6 +166,13 @@ const Welcome = ({ rootPath = '/wizard/', wallets = [], dispatch }: WizardElemen
       <Button type="default" label={t('wizard.import-hardware-wallet')} onClick={importHardware}>
         <>{t('wizard.import-hardware-wallet')}</>
       </Button>
+      <Button
+        type="default"
+        label={t('wizard.import-quantum-resistant-wallet')}
+        onClick={next(RoutePath.ImportSlhDsaWallet)}
+      >
+        <>{t('wizard.import-quantum-resistant-wallet')}</>
+      </Button>
       <hr data-content={t('common.or')} className={styles.dividingLine} />
       <Button
         type="primary"
@@ -173,6 +180,13 @@ const Welcome = ({ rootPath = '/wizard/', wallets = [], dispatch }: WizardElemen
         onClick={next(`${rootPath}${WalletWizardPath.Mnemonic}/${MnemonicAction.Create}`)}
       >
         <>{t('wizard.create-new-wallet')}</>
+      </Button>
+      <Button
+        type="primary"
+        label={t('wizard.create-quantum-resistant-wallet')}
+        onClick={next(RoutePath.CreateSlhDsaWallet)}
+      >
+        <>{t('wizard.create-quantum-resistant-wallet')}</>
       </Button>
     </div>
   )

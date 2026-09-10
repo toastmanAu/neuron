@@ -16,6 +16,7 @@ import PageContainer from 'components/PageContainer'
 import TransactionStatusWrap from 'components/TransactionStatusWrap'
 import FormattedTokenAmount from 'components/FormattedTokenAmount'
 import Receive from 'components/Receive'
+import SlhDsaReceive from 'components/SlhDsaReceive'
 import AddressBook from 'components/AddressBook'
 import Table from 'widgets/Table'
 import Button from 'widgets/Button'
@@ -72,7 +73,7 @@ const TransactionStatus = ({
 const Overview = () => {
   const {
     app: { pageNotice },
-    wallet: { id, balance = '', addresses },
+    wallet: { id, balance = '', addresses, lockProviderId },
     chain: {
       syncState: { cacheTipBlockNumber, bestKnownBlockNumber, syncStatus },
       transactions: { items = [] },
@@ -84,6 +85,9 @@ const Overview = () => {
   const navigate = useNavigate()
 
   const [showReceive, setShowReceive] = useState(false)
+  // A provider-backed wallet has one address derived from its public key rather than an HD chain,
+  // and that address is network specific. The secp receive view assumes neither.
+  const closeReceive = useCallback(() => setShowReceive(false), [])
   const [showAddressBook, setShowAddressBook] = useState(false)
 
   const isSingleAddress = addresses.length === 1
@@ -298,7 +302,8 @@ const Overview = () => {
         onRowClick={onRecentActivityClick}
       />
 
-      {showReceive ? <Receive onClose={() => setShowReceive(false)} /> : null}
+      {showReceive && lockProviderId ? <SlhDsaReceive walletId={id} onClose={closeReceive} /> : null}
+      {showReceive && !lockProviderId ? <Receive onClose={closeReceive} /> : null}
       {showAddressBook ? <AddressBook onClose={() => setShowAddressBook(false)} /> : null}
       <DataPathDialog
         show={isFirstSyncDialogShow}

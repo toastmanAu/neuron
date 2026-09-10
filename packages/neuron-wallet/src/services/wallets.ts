@@ -17,6 +17,8 @@ import NetworksService from './networks'
 import { NetworkType } from '../models/network'
 import { resetSyncTaskQueue } from '../block-sync-renderer'
 import SyncProgressService from './sync-progress'
+import ScriptIdentityService from './script-identities'
+import ScriptIdentity from '../models/script-identity'
 import { prefixWith0x } from '../utils/scriptAndAddress'
 
 const fileService = FileService.getInstance()
@@ -305,6 +307,58 @@ export class HardwareWallet extends Wallet {
   }
 }
 
+/**
+ * A wallet whose addresses come from a lock provider rather than from HD secp derivation.
+ *
+ * It has no extended public key, no keystore and no BIP44 paths: an SLH-DSA wallet is one key pair
+ * whose lock script differs per network. The HD-shaped address methods therefore throw
+ * `WalletFunctionNotSupported`, the same way a hardware wallet refuses keystore operations — asking
+ * an SLH-DSA wallet for its "next change address" is a category error, not a missing feature.
+ *
+ * `getAllAddresses()` returns an empty list rather than throwing, because callers treat it as "what
+ * HD addresses does this wallet have" and the honest answer is none. Its real addresses are read
+ * through `getScriptIdentities()`, which returns full lock scripts instead of blake160s.
+ */
+export class ScriptProviderWallet extends Wallet {
+  public isHardware = (): boolean => false
+
+  public isHDWallet(): boolean {
+    return false
+  }
+
+  constructor(props: WalletProperties) {
+    super(props)
+    this.isHD = false
+  }
+
+  static fromJSON = (json: WalletProperties) => new ScriptProviderWallet(json)
+
+  /** The wallet's real addresses, described by their complete lock scripts. */
+  public getScriptIdentities = async (): Promise<ScriptIdentity[]> => {
+    return ScriptIdentityService.getByWalletId(this.id)
+  }
+
+  public checkAndGenerateAddresses = async (): Promise<AddressInterface[] | undefined> => {
+    // Identities are created when the wallet's key is generated or imported, not by gap-limit
+    // scanning. Nothing to do, and nothing to fail.
+    return undefined
+  }
+
+  public getAllAddresses = async (): Promise<AddressInterface[]> => []
+
+  public getNextAddress = async (): Promise<AddressInterface | undefined> => {
+    throw new WalletFunctionNotSupported('getNextAddress')
+  }
+
+  public getNextChangeAddress = async (): Promise<AddressInterface | undefined> => {
+    throw new WalletFunctionNotSupported('getNextChangeAddress')
+  }
+
+  public getNextReceivingAddresses = async (): Promise<AddressInterface[]> => {
+    throw new WalletFunctionNotSupported('getNextReceivingAddresses')
+  }
+}
+
 export default class WalletService {
   private static instance: WalletService
   private listStore: Store // Save wallets (meta info except keystore, which is persisted separately)
@@ -349,6 +403,11 @@ export default class WalletService {
   private fromJSON(json: WalletProperties) {
     if (json.device) {
       return HardwareWallet.fromJSON(json)
+    }
+    // Checked before the keystore wallet, which would reject a wallet with no extended public key.
+    // Absent on every wallet written by an earlier Neuron, so nothing existing changes route.
+    if (json.lockProviderId) {
+      return ScriptProviderWallet.fromJSON(json)
     }
     return FileKeystoreWallet.fromJSON(json)
   }
@@ -422,11 +481,16 @@ export default class WalletService {
 
     const wallet = this.fromJSON({ ...props, id })
 
-    if (!wallet.isHardware()) {
+    if (!wallet.isHardware() && !wallet.getLockProviderId()) {
       wallet.saveKeystore(props.keystore!)
     }
 
-    const existWalletsProperties = this.getAll().filter(item => item.extendedKey === props.extendedKey)
+    // Duplicate detection keys off the extended public key. A provider-backed wallet has none, so
+    // every one of them would look like a duplicate of the first; their uniqueness lives in their
+    // key material and identities instead.
+    const existWalletsProperties = wallet.getLockProviderId()
+      ? []
+      : this.getAll().filter(item => item.extendedKey === props.extendedKey)
     if (existWalletsProperties.length) {
       const existWallets = existWalletsProperties.map(v => this.get(v.id))
       const duplicateWatchedWalletIds = existWallets
@@ -474,7 +538,7 @@ export default class WalletService {
     const newWallets = wallets.filter(w => w.id !== existingWalletId)
     this.listStore.writeSync(this.walletsKey, [...newWallets, newWallet])
 
-    if (!wallet.isHardware()) {
+    if (!wallet.isHardware() && !wallet.getLockProviderId()) {
       wallet.deleteKeystore()
     }
   }
@@ -524,11 +588,12 @@ export default class WalletService {
     }
 
     await AddressService.deleteByWalletId(id)
+    await ScriptIdentityService.deleteByWalletId(id)
     await SyncProgressService.deleteWalletSyncProgress(id)
 
     this.listStore.writeSync(this.walletsKey, newWallets)
 
-    if (!wallet.isHardware()) {
+    if (!wallet.isHardware() && !wallet.getLockProviderId()) {
       wallet.deleteKeystore()
     }
 
@@ -579,7 +644,7 @@ export default class WalletService {
   public clearAll = () => {
     this.getAll().forEach(w => {
       const wallet = this.fromJSON(w)
-      if (!wallet.isHardware()) {
+      if (!wallet.isHardware() && !wallet.getLockProviderId()) {
         wallet.deleteKeystore()
       }
     })

@@ -201,7 +201,9 @@
       "finish-create": "Finish Creating",
       "creating-wallet": "Wallet is being preparing, please wait",
       "add-one": "Add One More",
-      "detect-duplicate-wallets": "Detect Duplicate Wallets"
+      "detect-duplicate-wallets": "Detect Duplicate Wallets",
+      "create-quantum-resistant-wallet": "Create a quantum-resistant wallet",
+      "import-quantum-resistant-wallet": "Import a quantum-resistant wallet"
     },
     "import-keystore": {
       "title": "Import Keystore File",
@@ -1377,6 +1379,40 @@
       "lock-password-error": "Lock windows password error",
       "failed-times": "Failed more than {{frequency}} times, please retry after {{time}}",
       "verify-wallet": "Verify"
+    },
+    "slh-dsa": {
+      "create": {
+        "title": "Create a quantum-resistant wallet",
+        "name": "Wallet name",
+        "password": "Password",
+        "confirm": "Confirm password",
+        "advanced": "Advanced: choose a parameter set",
+        "submit": "Create wallet",
+        "slow": "slow to sign",
+        "signing-takes-seconds": "Signing with a quantum-resistant key takes a few seconds. Neuron will appear busy while it works.",
+        "slow-signing-warning": "This parameter set is several times slower to sign than the SHA2 sets, with no extra security in this context."
+      },
+      "receive": {
+        "title": "Quantum-resistant address",
+        "parameter-set": "Parameter set",
+        "watch-only": "Watch only — this wallet holds no key and cannot sign",
+        "network-note": "This address is specific to the current network, because the lock is deployed separately on mainnet and testnet."
+      },
+      "import": {
+        "title": "Import a quantum-resistant wallet",
+        "name": "Wallet name",
+        "mode": "What are you importing?",
+        "from-backup": "An encrypted backup file",
+        "watch-only": "A public key, to watch only",
+        "select-file": "Choose a backup file",
+        "backup": "Backup contents",
+        "public-key": "Public key",
+        "parameter-set": "Parameter set",
+        "watch-only-note": "A watch-only wallet holds no key. It can show a balance and receive, but cannot sign.",
+        "submit": "Import wallet",
+        "failed": "Could not import the wallet",
+        "unreadable-file": "That file could not be read"
+      }
     }
   }
 }
