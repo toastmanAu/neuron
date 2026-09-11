@@ -120,24 +120,39 @@ describe('interoperability with the reference Rust implementation', () => {
     describe(name, () => {
       const fullSignature = (vector as { signatureDeterministic?: string }).signatureDeterministic
 
-      // Only the parameter sets whose full signature is kept in the fixture can be verified
-      // directly; the rest are covered by the byte-equality test below.
-      const verifies = fullSignature ? it : it.skip
-      verifies('verifies a signature produced by the Rust implementation', () => {
-        const set = getParameterSet(name)
+      // Signed once. The slowest parameter sets take well over ten seconds each, and both
+      // assertions below are about the same artefact.
+      let signature: Uint8Array
+      beforeAll(() => {
+        signature = getParameterSet(name).signer.sign(bytes.bytify(vector.secretKey), bytes.bytify(vector.message))
+      }, 180000)
 
+      it('produces a byte identical signature from the same secret key and message', () => {
+        expect(signature.length).toBe(vector.signatureLength)
+        expect(bytes.hexify(sha256(signature))).toBe(vector.signatureSha256)
+      })
+
+      it('verifies the signature the Rust implementation would have produced', () => {
+        // Byte equality is asserted above, so verifying our own signature verifies the Rust one:
+        // they are the same bytes. That gives every parameter set verification coverage without
+        // carrying ~1.3 MB of hex signatures in the fixture.
         expect(
-          set.signer.verify(bytes.bytify(vector.publicKey), bytes.bytify(vector.message), bytes.bytify(fullSignature!))
+          getParameterSet(name).signer.verify(bytes.bytify(vector.publicKey), bytes.bytify(vector.message), signature)
         ).toBe(true)
       })
 
-      it('produces a byte identical signature from the same secret key and message', () => {
-        const set = getParameterSet(name)
-        const signature = set.signer.sign(bytes.bytify(vector.secretKey), bytes.bytify(vector.message))
-
-        expect(signature.length).toBe(vector.signatureLength)
-        expect(bytes.hexify(sha256(signature))).toBe(vector.signatureSha256)
-      }, 120000)
+      // Where the fixture does carry the Rust bytes, check them directly too rather than resting
+      // the whole claim on the transitive argument.
+      const directly = fullSignature ? it : it.skip
+      directly('verifies the stored Rust signature directly', () => {
+        expect(
+          getParameterSet(name).signer.verify(
+            bytes.bytify(vector.publicKey),
+            bytes.bytify(vector.message),
+            bytes.bytify(fullSignature!)
+          )
+        ).toBe(true)
+      })
 
       it('derives the same public key length the Rust implementation reported', () => {
         expect(bytes.bytify(vector.publicKey).byteLength).toBe(getParameterSet(name).publicKeyLength)

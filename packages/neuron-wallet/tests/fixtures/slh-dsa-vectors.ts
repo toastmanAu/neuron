@@ -7,10 +7,15 @@
  * against fixed inputs, so these values are an oracle produced by the implementation the deployed
  * lock is built from — not a restatement of this repository's TypeScript.
  *
+ * Regenerate with `slh-dsa-vector-generator`:
+ *   cargo build --release && ./target/release/vecgen > vectors.json
+ *   node to-fixture.mjs vectors.json <this file>
+ *
  * - `paramSets`      prefixes, key/signature lengths and script args derivation, all 12 sets.
- * - `keyPairs`       deterministic FIPS 205 keys and signatures. `signatureDeterministic` is kept
- *                    in full for the two smallest parameter sets; every set carries
- *                    `signatureSha256` so byte equality is provable without ~200KB of hex.
+ * - `keyPairs`       deterministic FIPS 205 keys and signatures, all 12 sets.
+ *                    `signatureDeterministic` is kept in full only for the two smallest sets;
+ *                    every set carries `signatureSha256`, which proves byte equality just as well
+ *                    without ~1.3 MB of hex.
  * - `messageAll`     CKB_TX_MESSAGE_ALL digests. Each resolved input also carries
  *                    `cellOutputMolecule`, the exact bytes the Rust side hashed, so a divergence is
  *                    localisable to one field instead of surfacing only as a wrong final digest.
@@ -78,6 +83,62 @@ export const SLH_DSA_VECTORS = {
         '0xd70d3259e4e1cb631c663cf4d73c4c04022ab1ba804098e6cb293e6770eb3a95da211e6a663bd37311aabecb86beda3ff6d0c233a1c4cb77febe023d51d6fc53616750997ac05e226953798876a2c369ebfab5059be7821a2c63dd28b74ebaf50d314420c7a81452b71fb3db55e2a650cd0304fcd75a0aac1394162b9f5efd1f',
       signatureLength: 29792,
       signatureSha256: '0xf3d8a7f8fcdb0cba0ad09e21ff6cfaeeec1eb47a55afb79c4781e347cf2970a9',
+    },
+    {
+      message: '0x579bb25ccc918cce9a6077706ee8397f22d6f965d692705207884d3273f1c1b4',
+      paramSet: 'SLH-DSA-SHA2-192f',
+      publicKey: '0xf6d0c233a1c4cb77febe023d51d6fc53616750997ac05e2295414e42f99b097b1a1d3bd2a5c5e3b6ee18262e70c33491',
+      secretKey:
+        '0xd70d3259e4e1cb631c663cf4d73c4c04022ab1ba804098e6cb293e6770eb3a95da211e6a663bd37311aabecb86beda3ff6d0c233a1c4cb77febe023d51d6fc53616750997ac05e2295414e42f99b097b1a1d3bd2a5c5e3b6ee18262e70c33491',
+      signatureLength: 35664,
+      signatureSha256: '0x8362e9b6d82733eeb799492278dba88f27126edf79d35776d9835025711d4a33',
+    },
+    {
+      message: '0x579bb25ccc918cce9a6077706ee8397f22d6f965d692705207884d3273f1c1b4',
+      paramSet: 'SLH-DSA-SHA2-256f',
+      publicKey:
+        '0x69e1487a42b712387395f146317406caa0191ac7640df996995a81c82f30fb36f47e3a90f5e1e9cc2785611d6802651035761719b74f9b0556d5a147a971f50d',
+      secretKey:
+        '0x646070befe52afae62eaaf875e8a2dc0b689b544e52bec4360603197d68ce9c8a187582f78b33643fe6b8e80a5f4561dccb8ac5aa6b853a53df1e74d18d6c9fb69e1487a42b712387395f146317406caa0191ac7640df996995a81c82f30fb36f47e3a90f5e1e9cc2785611d6802651035761719b74f9b0556d5a147a971f50d',
+      signatureLength: 49856,
+      signatureSha256: '0x76590bce9d62ab4af0a0537f219a632eb1a91e8dfaf5286cf7b0d3b834747874',
+    },
+    {
+      message: '0x579bb25ccc918cce9a6077706ee8397f22d6f965d692705207884d3273f1c1b4',
+      paramSet: 'SLH-DSA-SHAKE-128f',
+      publicKey: '0xa187582f78b33643fe6b8e80a5f4561d5fb59ccdd2815fbf9b41155a6317222d',
+      secretKey:
+        '0x646070befe52afae62eaaf875e8a2dc0b689b544e52bec4360603197d68ce9c8a187582f78b33643fe6b8e80a5f4561d5fb59ccdd2815fbf9b41155a6317222d',
+      signatureLength: 17088,
+      signatureSha256: '0x2933a5353ddf7f78af67e261a2e602a87149c1d650df210fc264c0304d25ad11',
+    },
+    {
+      message: '0x579bb25ccc918cce9a6077706ee8397f22d6f965d692705207884d3273f1c1b4',
+      paramSet: 'SLH-DSA-SHAKE-192f',
+      publicKey: '0x649ff0522051bb19ea95ba6b41e7acc776c91a3b782b29571ecfef860fbf3079d89d07ee192c84023768d2da8f274855',
+      secretKey:
+        '0x9d3080237d64f550a1136b7ad25c2a436d129b6e30be56a3f06d2e2799622e81c45904751a0f4a2a0e58b07ae1c94b8d649ff0522051bb19ea95ba6b41e7acc776c91a3b782b29571ecfef860fbf3079d89d07ee192c84023768d2da8f274855',
+      signatureLength: 35664,
+      signatureSha256: '0x7fc0287cb3067e8681eeed3f090e8c0bbfb4edfaf6f9ab768a64ebdd68ce0d6a',
+    },
+    {
+      message: '0x579bb25ccc918cce9a6077706ee8397f22d6f965d692705207884d3273f1c1b4',
+      paramSet: 'SLH-DSA-SHAKE-192s',
+      publicKey: '0x649ff0522051bb19ea95ba6b41e7acc776c91a3b782b2957e539c9706327dbf221ec234e858c343e12fd8fc179d631a8',
+      secretKey:
+        '0x9d3080237d64f550a1136b7ad25c2a436d129b6e30be56a3f06d2e2799622e81c45904751a0f4a2a0e58b07ae1c94b8d649ff0522051bb19ea95ba6b41e7acc776c91a3b782b2957e539c9706327dbf221ec234e858c343e12fd8fc179d631a8',
+      signatureLength: 16224,
+      signatureSha256: '0xa565d0b2561f3c7c5bbd91c8c59777f758ba8045301302a2d6b1b2ff63fd582a',
+    },
+    {
+      message: '0x579bb25ccc918cce9a6077706ee8397f22d6f965d692705207884d3273f1c1b4',
+      paramSet: 'SLH-DSA-SHAKE-256f',
+      publicKey:
+        '0x41b6dee3e0e735360f95eee436a4d8b3498d754651f9c786cc654fd8647f70a01687fda96d1a4ae04df6b30a9f68081d3be86f98e7c862c5ca962ef3a768c7a3',
+      secretKey:
+        '0xff8aadf8b737cac471a036afdee32454c8f4257a25a202a27338ef2ec578a54a63f7f010972c0bd124d65f37e7d0735997d26a2e094bd3b9549e8a03803cb76441b6dee3e0e735360f95eee436a4d8b3498d754651f9c786cc654fd8647f70a01687fda96d1a4ae04df6b30a9f68081d3be86f98e7c862c5ca962ef3a768c7a3',
+      signatureLength: 49856,
+      signatureSha256: '0x68dd014cd3dd168904de3cbfb2c9ab9f8a13ff84ebaf2e83fcb3350cd1706e0c',
     },
   ],
   messageAll: [
@@ -358,7 +419,6 @@ export const SLH_DSA_VECTORS = {
       txHash: '0x072612bdbb9325a4d69862e1d37c4cc7ce12270312e6fd39fe56692db0be994e',
     },
   ],
-  note: 'Generated from nervosnetwork/quantum-resistant-lock-script @ 082c0a19 via ckb-fips205-utils.',
   paramSets: [
     {
       argsPrefix: '0x8001010160',

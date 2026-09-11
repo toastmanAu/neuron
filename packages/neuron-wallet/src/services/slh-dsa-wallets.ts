@@ -51,7 +51,22 @@ export interface WatchOnlyParams {
 export default class SlhDsaWalletService {
   private static vaultFileName = (walletId: string) => `${walletId}.json`
 
+  /**
+   * Create the vault directory if it is not there yet.
+   *
+   * `FileService` throws `ModuleNotFound` for reads as well as writes, so this cannot be left to
+   * the first write: on a fresh profile the first thing that happens is a read — `create` checks
+   * `hasVault` before generating a key — and that threw before any vault had ever been written,
+   * which made creating the very first quantum-resistant wallet impossible.
+   */
+  private static ensureModule(): void {
+    if (!fileService.hasModule(MODULE_NAME)) {
+      fileService.addModule(MODULE_NAME)
+    }
+  }
+
   public static hasVault(walletId: string): boolean {
+    SlhDsaWalletService.ensureModule()
     return fileService.hasFile(MODULE_NAME, SlhDsaWalletService.vaultFileName(walletId))
   }
 
@@ -96,6 +111,7 @@ export default class SlhDsaWalletService {
     if (!SlhDsaWalletService.hasVault(walletId)) {
       throw new VaultNotFound(walletId)
     }
+    SlhDsaWalletService.ensureModule()
     return SlhDsaKeystore.fromJson(fileService.readFileSync(MODULE_NAME, SlhDsaWalletService.vaultFileName(walletId)))
   }
 
@@ -156,6 +172,7 @@ export default class SlhDsaWalletService {
 
   public static async delete(walletId: string): Promise<void> {
     if (SlhDsaWalletService.hasVault(walletId)) {
+      SlhDsaWalletService.ensureModule()
       fileService.deleteFileSync(MODULE_NAME, SlhDsaWalletService.vaultFileName(walletId))
     }
     await ScriptIdentityService.deleteByWalletId(walletId)
@@ -196,7 +213,7 @@ export default class SlhDsaWalletService {
   }
 
   private static writeVault(walletId: string, keystore: SlhDsaKeystore): void {
-    fileService.addModule(MODULE_NAME)
+    SlhDsaWalletService.ensureModule()
     fileService.writeFileSync(
       MODULE_NAME,
       SlhDsaWalletService.vaultFileName(walletId),

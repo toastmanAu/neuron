@@ -3,20 +3,30 @@ import 'dotenv/config'
 // In-memory stand-in for the on-disk vault store, so these tests exercise the real service logic
 // without touching the user's Neuron directory.
 const files = new Map<string, string>()
+const modules = new Set<string>()
 const key = (moduleName: string, filename: string) => `${moduleName}/${filename}`
 
+// The real FileService throws when a module directory has not been created, and reads throw just
+// as writes do. A mock that answers `hasModule: () => true` is kinder than the thing it stands in
+// for, and hides exactly the failure a fresh profile hits on its very first read.
 jest.mock('../../src/services/file', () => ({
   __esModule: true,
   default: {
     getInstance: () => ({
-      addModule: () => undefined,
-      hasModule: () => true,
-      hasFile: (m: string, f: string) => files.has(key(m, f)),
+      addModule: (m: string) => {
+        modules.add(m)
+      },
+      hasModule: (m: string) => modules.has(m),
+      hasFile: (m: string, f: string) => {
+        if (!modules.has(m)) throw new Error(`Module ${m} not found`)
+        return files.has(key(m, f))
+      },
       readFileSync: (m: string, f: string) => {
         if (!files.has(key(m, f))) throw new Error(`FileNotFound ${f}`)
         return files.get(key(m, f))!
       },
       writeFileSync: (m: string, f: string, data: string) => {
+        if (!modules.has(m)) throw new Error(`Module ${m} not found`)
         files.set(key(m, f), data)
       },
       deleteFileSync: (m: string, f: string) => {
@@ -66,10 +76,31 @@ describe('SlhDsaWalletService', () => {
 
   beforeEach(async () => {
     files.clear()
+    modules.clear()
     await getConnection().createQueryBuilder().delete().from(ScriptIdentityEntity).execute()
   })
 
   describe('creating a wallet', () => {
+    it('creates the first wallet on a profile that has no vault directory yet', async () => {
+      // The case every new user hits. `create` reads before it writes, and FileService throws
+      // ModuleNotFound on reads too, so nothing had ever created the directory by the time the
+      // first read happened. Creating a quantum-resistant wallet was impossible on a fresh install.
+      modules.clear()
+      files.clear()
+
+      await expect(
+        SlhDsaWalletService.create({ walletId: 'first', parameterSet: PARAM, password: PASSWORD }, FAST)
+      ).resolves.toEqual(expect.objectContaining({ parameterSet: PARAM }))
+      expect(SlhDsaWalletService.hasVault('first')).toBe(true)
+    }, 60000)
+
+    it('reports no vault, rather than throwing, before anything has been written', () => {
+      modules.clear()
+      files.clear()
+
+      expect(SlhDsaWalletService.hasVault('nobody')).toBe(false)
+    })
+
     it('stores an encrypted vault and returns the public key', async () => {
       const { publicKey, parameterSet } = await SlhDsaWalletService.create(
         { walletId: WALLET, parameterSet: PARAM, password: PASSWORD },
@@ -190,6 +221,7 @@ describe('SlhDsaWalletService', () => {
       const originalSecret = await SlhDsaWalletService.getSecret(WALLET, PASSWORD)
 
       files.clear()
+      modules.clear()
       await getConnection().createQueryBuilder().delete().from(ScriptIdentityEntity).execute()
 
       await SlhDsaWalletService.importBackup('restored', JSON.stringify(backup))
