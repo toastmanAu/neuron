@@ -148,4 +148,56 @@ describe('FiberService', () => {
       expect(client.isHealthy).toHaveBeenCalled()
     })
   })
+
+  describe('closeChannel', () => {
+    it('closes to the script the caller names', async () => {
+      // The point of external funding: the funds came from a lock the node does not control, so
+      // they have to be able to go back to one. Proven on testnet against an SLH-DSA lock.
+      const client = clientWith(null)
+      const service = new FiberService(client as never)
+      const closeScript = { code_hash: `0x${'11'.repeat(32)}`, hash_type: 'data1', args: `0x${'22'.repeat(32)}` }
+
+      await service.closeChannel({ channelId: '0xchan', closeScript: closeScript as never })
+
+      expect(client.call).toHaveBeenCalledWith('shutdown_channel', [
+        expect.objectContaining({ channel_id: '0xchan', close_script: closeScript }),
+      ])
+    })
+
+    it('passes a fee rate through when given', async () => {
+      const client = clientWith(null)
+      const service = new FiberService(client as never)
+
+      await service.closeChannel({ channelId: '0xchan', feeRate: '0x3e8' })
+
+      expect(client.call).toHaveBeenCalledWith('shutdown_channel', [expect.objectContaining({ fee_rate: '0x3e8' })])
+    })
+
+    it('refuses to force a close that also names a script or fee rate', async () => {
+      // A forced close broadcasts the latest commitment transaction, whose outputs were fixed when
+      // the channel was negotiated. There is nothing left for a close script to affect, so asking
+      // for both is a misunderstanding worth naming rather than a request to reconcile.
+      const client = clientWith(null)
+      const service = new FiberService(client as never)
+
+      await expect(
+        service.closeChannel({ channelId: '0xchan', force: true, closeScript: {} as never })
+      ).rejects.toThrow(/force/i)
+      await expect(service.closeChannel({ channelId: '0xchan', force: true, feeRate: '0x3e8' })).rejects.toThrow(
+        /force/i
+      )
+      expect(client.call).not.toHaveBeenCalled()
+    })
+
+    it('allows a plain forced close', async () => {
+      const client = clientWith(null)
+      const service = new FiberService(client as never)
+
+      await service.closeChannel({ channelId: '0xchan', force: true })
+
+      expect(client.call).toHaveBeenCalledWith('shutdown_channel', [
+        expect.objectContaining({ channel_id: '0xchan', force: true }),
+      ])
+    })
+  })
 })

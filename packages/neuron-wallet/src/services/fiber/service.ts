@@ -7,6 +7,7 @@ import {
   FiberPeer,
   NewInvoiceParams,
   SendPaymentParams,
+  CloseChannelParams,
 } from './types'
 import { asRecord, optionalString, requireArray, requireBoolean, requireString, toScript } from './validate'
 
@@ -124,6 +125,33 @@ export default class FiberService {
       'send_payment'
     )
     return FiberService.toPayment(raw, 'send_payment')
+  }
+
+  /**
+   * Close a channel, optionally paying out to a script of the caller's choosing.
+   *
+   * A cooperative close settles the current balances into a fresh transaction, so the payout script
+   * is still open at this point — which is what lets an externally funded channel return its funds
+   * to the lock that funded it. A forced close instead broadcasts the latest commitment
+   * transaction, whose outputs were fixed when the channel was negotiated; there is nothing left
+   * for a close script or fee rate to affect, so asking for both is refused here rather than at the
+   * node, where the error arrives with less context.
+   */
+  public async closeChannel(params: CloseChannelParams): Promise<void> {
+    if (params.force && (params.closeScript !== undefined || params.feeRate !== undefined)) {
+      throw new Error(
+        'A forced close broadcasts the commitment transaction agreed when the channel was opened, so it cannot also take a close script or fee rate'
+      )
+    }
+
+    await this.client.call('shutdown_channel', [
+      {
+        channel_id: params.channelId,
+        close_script: params.closeScript,
+        fee_rate: params.feeRate,
+        force: params.force,
+      },
+    ])
   }
 
   public async getPayment(paymentHash: string): Promise<FiberPayment> {

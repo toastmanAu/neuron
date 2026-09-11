@@ -63,6 +63,21 @@ export interface SendPaymentParams {
   keysend?: boolean
 }
 
+export interface CloseChannelParams {
+  channelId: string
+  /**
+   * Where the channel balance goes.
+   *
+   * Matters most for an externally funded channel: the funds came from a lock the node does not
+   * control, so they have to be able to go back to one. Omitted, the node uses the shutdown script
+   * agreed when the channel was opened.
+   */
+  closeScript?: FiberScript
+  feeRate?: string
+  /** Broadcast the latest commitment transaction instead of agreeing a close with the peer. */
+  force?: boolean
+}
+
 export interface FiberPayment {
   paymentHash: string
   status: string
