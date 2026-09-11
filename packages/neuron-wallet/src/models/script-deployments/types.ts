@@ -43,8 +43,49 @@ export interface ScriptDeployment {
   readonly hashType: ScriptHashType
   readonly cellDep: ScriptDeploymentCellDep
   readonly status: DeploymentStatus
+  /**
+   * Data hash of the dep cell's binary, as read from the live chain when this record was verified.
+   *
+   * Separate from `codeHash` because on mainnet they are not the same thing. Mainnet is deployed
+   * under a Type ID, so `codeHash` is stable *by construction* while the binary behind it is
+   * replaceable by the publisher. Comparing code hashes can therefore never detect a redeploy: it
+   * is guaranteed to match afterwards. Only the binary's own hash changes.
+   *
+   * On testnet the two coincide — `data1` means the code hash is the data hash — so a testnet
+   * record is structurally immune and this field merely restates `codeHash`.
+   */
+  readonly verifiedBinaryHash?: string
   /** Where these values came from, ideally a URL pinned to a commit. */
   readonly source?: string
+}
+
+/**
+ * Whether the binary deployed at a record's cell dep is still the one that was verified.
+ *
+ * `unpinned` is not a pass. It means the record never recorded which binary it was checked
+ * against, so nothing can be concluded — reported distinctly so a caller cannot read a missing
+ * pin as agreement.
+ */
+export type DeployedBinaryVerification =
+  | { readonly result: 'match' }
+  | { readonly result: 'unpinned' }
+  | { readonly result: 'changed'; readonly expected: string; readonly actual: string }
+
+/**
+ * Compare the binary now at a deployment's cell dep against the one that was verified.
+ *
+ * Takes the live data hash rather than fetching it: this stays a pure comparison, and the caller
+ * decides when a node round trip is worth making.
+ */
+export const verifyDeployedBinary = (
+  deployment: ScriptDeployment,
+  liveBinaryHash: string
+): DeployedBinaryVerification => {
+  const expected = deployment.verifiedBinaryHash
+  if (!expected) return { result: 'unpinned' }
+  return expected.toLowerCase() === liveBinaryHash.toLowerCase()
+    ? { result: 'match' }
+    : { result: 'changed', expected, actual: liveBinaryHash }
 }
 
 /**

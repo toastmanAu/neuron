@@ -1,5 +1,11 @@
 import 'dotenv/config'
-import { getDefaultScriptDeploymentRegistry, SLH_DSA_PROVIDER_ID } from '../../../src/models/script-deployments'
+import {
+  getDefaultScriptDeploymentRegistry,
+  SLH_DSA_PROVIDER_ID,
+  BUNDLED_SCRIPT_DEPLOYMENTS,
+  verifyDeployedBinary,
+  ScriptDeployment,
+} from '../../../src/models/script-deployments'
 import { ScriptHashType } from '../../../src/models/chain/script'
 import { DepType } from '../../../src/models/chain/cell-dep'
 import { Network, NetworkType, MAINNET_GENESIS_HASH, TESTNET_GENESIS_HASH } from '../../../src/models/network'
@@ -107,5 +113,81 @@ describe('bundled script deployments', () => {
         .map(d => d.id)
         .sort()
     ).toEqual([`${SLH_DSA_PROVIDER_ID}/mainnet`, `${SLH_DSA_PROVIDER_ID}/testnet`])
+  })
+})
+
+describe('verifyDeployedBinary', () => {
+  const deployment = (overrides: Partial<ScriptDeployment> = {}): ScriptDeployment => ({
+    id: 'x/testnet',
+    providerId: 'x',
+    network: 'testnet',
+    codeHash: `0x${'11'.repeat(32)}`,
+    hashType: ScriptHashType.Data1,
+    cellDep: { txHash: `0x${'22'.repeat(32)}`, index: '0x0', depType: DepType.Code },
+    status: 'verified',
+    ...overrides,
+  })
+
+  it('agrees when the deployed binary is the one that was verified', () => {
+    const d = deployment({ verifiedBinaryHash: `0x${'ab'.repeat(32)}` })
+
+    expect(verifyDeployedBinary(d, `0x${'ab'.repeat(32)}`)).toEqual({ result: 'match' })
+  })
+
+  it('ignores case, since hex casing is not meaningful', () => {
+    const d = deployment({ verifiedBinaryHash: `0x${'ab'.repeat(32)}` })
+
+    expect(verifyDeployedBinary(d, `0x${'AB'.repeat(32)}`)).toEqual({ result: 'match' })
+  })
+
+  it('reports a changed binary, naming both hashes', () => {
+    const d = deployment({ verifiedBinaryHash: `0x${'ab'.repeat(32)}` })
+
+    expect(verifyDeployedBinary(d, `0x${'cd'.repeat(32)}`)).toEqual({
+      result: 'changed',
+      expected: `0x${'ab'.repeat(32)}`,
+      actual: `0x${'cd'.repeat(32)}`,
+    })
+  })
+
+  it('reports an unpinned record distinctly, rather than as agreement', () => {
+    // A record that never said which binary it was checked against cannot agree with anything.
+    // Returning 'match' here would let a missing pin read as a passed check.
+    expect(verifyDeployedBinary(deployment(), `0x${'ab'.repeat(32)}`)).toEqual({ result: 'unpinned' })
+  })
+})
+
+describe('bundled deployments pin the binary they were verified against', () => {
+  // Read from the live chains on 2026-09-12: each dep cell was fetched and hashed, and every one
+  // of the twelve parameter sets was executed against both binaries under ckb-debugger.
+  const LIVE = {
+    mainnet: '0x49417a0ed39196e8d90d0088ca98bf6b881966ba1c2ea12160ca42141787565e',
+    testnet: '0x147ecbb5c5127d982ee1362d2c2bb4267803da2eb006d150e88af6caaa0a7eaf',
+  }
+
+  BUNDLED_SCRIPT_DEPLOYMENTS.forEach(d => {
+    it(`${d.id} pins the binary observed on chain`, () => {
+      expect(d.verifiedBinaryHash).toBe(LIVE[d.network])
+    })
+
+    it(`${d.id} agrees with that binary`, () => {
+      expect(verifyDeployedBinary(d, LIVE[d.network])).toEqual({ result: 'match' })
+    })
+  })
+
+  it('pins mainnet to something other than its code hash, because a Type ID cannot detect a redeploy', () => {
+    // The whole point of the field. Mainnet's codeHash is stable by construction across upgrades,
+    // so if the pin were merely a copy of it the check could never fail.
+    const mainnet = BUNDLED_SCRIPT_DEPLOYMENTS.find(d => d.network === 'mainnet')!
+
+    expect(mainnet.hashType).toBe(ScriptHashType.Type)
+    expect(mainnet.verifiedBinaryHash).not.toBe(mainnet.codeHash)
+  })
+
+  it('pins testnet to its code hash, because data1 makes them the same thing', () => {
+    const testnet = BUNDLED_SCRIPT_DEPLOYMENTS.find(d => d.network === 'testnet')!
+
+    expect(testnet.hashType).toBe(ScriptHashType.Data1)
+    expect(testnet.verifiedBinaryHash).toBe(testnet.codeHash)
   })
 })
