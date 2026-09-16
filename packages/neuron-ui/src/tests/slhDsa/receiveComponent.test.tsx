@@ -10,8 +10,15 @@ const getSlhDsaAddresses = vi.fn()
 
 vi.mock('services/remote', () => ({
   getSlhDsaAddresses: (...a: unknown[]) => getSlhDsaAddresses(...a),
+  // Reached through Dialog -> utils -> utils/i18n, which picks the language at import time.
+  getLocale: () => 'en',
 }))
-vi.mock('react-i18next', () => ({ useTranslation: () => [(k: string) => k] }))
+// Spread over the real module rather than replacing it: Dialog reaches utils/i18n, which needs the
+// genuine `initReactI18next`.
+vi.mock('react-i18next', async importOriginal => ({
+  ...(await importOriginal<typeof import('react-i18next')>()),
+  useTranslation: () => [(k: string) => k],
+}))
 
 const address: Controller.SlhDsaAddress = {
   address: 'ckt1qq6pngwqn6e9vlm92th8w7cvcsuqhf9pvpm0hkzr',
@@ -88,5 +95,21 @@ describe('SlhDsaReceive', () => {
     fireEvent.click(shown)
 
     expect(writeText).toHaveBeenCalledWith(address.address)
+  })
+
+  it('presents as a dialog when it is shown over the overview, the way Receive does', async () => {
+    // Overview renders this in the same slot as the secp receive view. That one is a modal; an
+    // inline block there would push the page around instead of appearing over it.
+    render(<SlhDsaReceive walletId="w1" onClose={vi.fn()} />)
+
+    await screen.findByTestId('address')
+    expect(document.querySelector('dialog')).toBeInTheDocument()
+  })
+
+  it('stays inline when there is nothing to close, so it can be used as a page', async () => {
+    render(<SlhDsaReceive walletId="w1" />)
+
+    await screen.findByTestId('address')
+    expect(document.querySelector('dialog')).not.toBeInTheDocument()
   })
 })

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import Alert from 'widgets/Alert'
 import Button from 'widgets/Button'
 import CopyZone from 'widgets/CopyZone'
+import Dialog from 'widgets/Dialog'
 import QRCode from 'widgets/QRCode'
 import { getSlhDsaAddresses } from 'services/remote'
 import type { ControllerResponse, SuccessFromController } from 'services/remote/remoteApiWrapper'
@@ -49,16 +50,34 @@ const SlhDsaReceive = ({ walletId, onClose }: SlhDsaReceiveProps) => {
     </div>
   ) : null
 
-  if (error) {
-    return (
+  /**
+   * Shown over the overview when it can be dismissed, inline when it cannot.
+   *
+   * Overview renders this in the same slot as the secp `Receive`, which is a modal. An inline block
+   * there would push the page around instead of appearing over it.
+   */
+  const frame = (children: React.ReactNode) =>
+    onClose ? (
+      <Dialog show title={t('slh-dsa.receive.title')} onCancel={onClose} showFooter={false}>
+        <div className={styles.container}>{children}</div>
+      </Dialog>
+    ) : (
       <div className={styles.container}>
+        <h2 className={styles.title}>{t('slh-dsa.receive.title')}</h2>
+        {children}
+      </div>
+    )
+
+  if (error) {
+    return frame(
+      <>
         <ul className={styles.notices}>
           <Alert status="error" data-testid="receive-error">
             {error}
           </Alert>
         </ul>
         {close}
-      </div>
+      </>
     )
   }
 
@@ -66,10 +85,8 @@ const SlhDsaReceive = ({ walletId, onClose }: SlhDsaReceiveProps) => {
     return close
   }
 
-  return (
-    <div className={styles.container}>
-      <h2 className={styles.title}>{t('slh-dsa.receive.title')}</h2>
-
+  return frame(
+    <>
       <div className={styles.qrCode}>
         <QRCode value={address.address} size={128} includeMargin />
       </div>
@@ -97,7 +114,7 @@ const SlhDsaReceive = ({ walletId, onClose }: SlhDsaReceiveProps) => {
       </ul>
 
       {close}
-    </div>
+    </>
   )
 }
 
