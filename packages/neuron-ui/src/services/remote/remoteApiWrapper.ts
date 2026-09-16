@@ -33,6 +33,8 @@ type Action =
   | 'get-slh-dsa-addresses'
   | 'export-slh-dsa-backup'
   | 'import-slh-dsa-backup'
+  | 'import-slh-dsa-mnemonic'
+  | 'export-slh-dsa-mnemonic'
   | 'import-slh-dsa-watch-only'
   // App
   | 'get-system-codehash'

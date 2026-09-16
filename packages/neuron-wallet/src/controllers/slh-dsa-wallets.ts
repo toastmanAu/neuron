@@ -50,6 +50,14 @@ const toAddress = (identity: ScriptIdentity): SlhDsaAddress => ({
   watchOnly: identity.isWatchOnly(),
 })
 
+export interface CreatedWallet {
+  id: string
+  name: string
+  addresses: SlhDsaAddress[]
+  /** Present only when the phrase was generated here, i.e. on creation. */
+  mnemonic?: string
+}
+
 /**
  * Renderer-facing operations for quantum-resistant wallets.
  *
@@ -73,29 +81,88 @@ export default class SlhDsaWalletsController {
     password: string
     /** Untrusted at this boundary: narrowed by `getParameterSet`, which rejects anything unknown. */
     parameterSet: string
-  }): Promise<{ status: ResponseCode; result?: { id: string; name: string; addresses: SlhDsaAddress[] } }> {
+  }): Promise<{ status: ResponseCode; result?: CreatedWallet }> {
+    const parameterSet = SlhDsaWalletsController.checkedParameterSet(params)
+
+    return SlhDsaWalletsController.withWalletRecord(params.name, async walletId => {
+      const { mnemonic } = await SlhDsaWalletService.create(
+        { walletId, parameterSet, password: params.password },
+        undefined
+      )
+      // Returned once, at creation, and never stored. This is the only moment the user can write
+      // it down without their password.
+      return { mnemonic }
+    })
+  }
+
+  /** Restore a wallet from its three BIP39 phrases. */
+  public async importMnemonic(params: {
+    name: string
+    password: string
+    parameterSet: string
+    mnemonic: string
+  }): Promise<{ status: ResponseCode; result?: CreatedWallet }> {
+    const parameterSet = SlhDsaWalletsController.checkedParameterSet(params)
+
+    return SlhDsaWalletsController.withWalletRecord(params.name, async walletId => {
+      await SlhDsaWalletService.importMnemonic(
+        { walletId, parameterSet, password: params.password, mnemonic: params.mnemonic },
+        undefined
+      )
+      // Deliberately not echoed back: the renderer already has it, and returning it would put a
+      // second copy of the wallet across the boundary and into whatever the caller logs.
+      return {}
+    })
+  }
+
+  /** Show a wallet's recovery phrase again. Behind the password, because the phrase is the wallet. */
+  public async exportMnemonic(params: {
+    walletID: string
+    password: string
+  }): Promise<{ status: ResponseCode; result?: string }> {
+    if (!params.password) {
+      throw new Error('A password is required to show a recovery phrase')
+    }
+    return {
+      status: ResponseCode.Success,
+      result: await SlhDsaWalletService.exportMnemonic(params.walletID, params.password),
+    }
+  }
+
+  private static checkedParameterSet(params: { password: string; parameterSet: string }): SlhDsaParameterSetName {
     if (!params.password) {
       throw new Error('A password is required to create a quantum-resistant wallet')
     }
-    const parameterSet = getParameterSet(params.parameterSet as SlhDsaParameterSetName).name
+    // Both checks run before any wallet record exists, so a bad request leaves nothing behind.
+    return getParameterSet(params.parameterSet as SlhDsaParameterSetName).name
+  }
 
+  /**
+   * Create the wallet record, run `withWallet`, and derive the identity for the current network.
+   *
+   * A wallet listed with no vault behind it is visible, unusable and awkward to remove, so anything
+   * that throws takes the record with it.
+   */
+  private static async withWalletRecord(
+    name: string,
+    withWallet: (walletId: string) => Promise<{ mnemonic?: string }>
+  ): Promise<{ status: ResponseCode; result?: CreatedWallet }> {
     const network = NetworksService.getInstance().getCurrent()
     const wallet = WalletService.getInstance().create({
       id: '',
-      name: params.name,
+      name,
       extendedKey: '',
       lockProviderId: SLH_DSA_PROVIDER_ID,
     })
 
     try {
-      await SlhDsaWalletService.create({ walletId: wallet.id, parameterSet, password: params.password }, undefined)
+      const extra = await withWallet(wallet.id)
       const identity = await SlhDsaWalletService.deriveIdentity(wallet.id, network)
       return {
         status: ResponseCode.Success,
-        result: { id: wallet.id, name: wallet.name, addresses: [toAddress(identity)] },
+        result: { id: wallet.id, name: wallet.name, addresses: [toAddress(identity)], ...extra },
       }
     } catch (error) {
-      // A wallet listed with no vault behind it is visible, unusable and awkward to remove. Undo it.
       await WalletService.getInstance().delete(wallet.id)
       throw error
     }

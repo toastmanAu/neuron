@@ -3,6 +3,8 @@ import 'dotenv/config'
 const createMock = jest.fn()
 const deriveIdentityMock = jest.fn()
 const importWatchOnlyMock = jest.fn()
+const importMnemonicMock = jest.fn()
+const exportMnemonicMock = jest.fn()
 const exportBackupMock = jest.fn()
 const importBackupMock = jest.fn()
 const walletCreateMock = jest.fn()
@@ -15,6 +17,8 @@ jest.mock('../../src/services/slh-dsa-wallets', () => ({
     create: (...a: unknown[]) => createMock(...a),
     deriveIdentity: (...a: unknown[]) => deriveIdentityMock(...a),
     importWatchOnly: (...a: unknown[]) => importWatchOnlyMock(...a),
+    importMnemonic: (...a: unknown[]) => importMnemonicMock(...a),
+    exportMnemonic: (...a: unknown[]) => exportMnemonicMock(...a),
     exportBackup: (...a: unknown[]) => exportBackupMock(...a),
     importBackup: (...a: unknown[]) => importBackupMock(...a),
     delete: jest.fn(),
@@ -42,6 +46,10 @@ const network = {
   readonly: false,
 }
 
+// 36 words: three BIP39 phrases. Contents do not matter here, only that the controller passes it
+// through without inspecting or storing it.
+const MNEMONIC = Array.from({ length: 36 }, (_, i) => `word${i}`).join(' ')
+
 describe('SlhDsaWalletsController', () => {
   const controller = new SlhDsaWalletsController()
 
@@ -49,7 +57,17 @@ describe('SlhDsaWalletsController', () => {
     jest.clearAllMocks()
     getCurrentNetworkMock.mockReturnValue(network)
     walletCreateMock.mockReturnValue({ id: 'w1', name: 'pq', toJSON: () => ({ id: 'w1', name: 'pq' }) })
-    createMock.mockResolvedValue({ publicKey: `0x${'cd'.repeat(32)}`, parameterSet: 'SLH-DSA-SHA2-128s' })
+    createMock.mockResolvedValue({
+      publicKey: `0x${'cd'.repeat(32)}`,
+      parameterSet: 'SLH-DSA-SHA2-128s',
+      mnemonic: MNEMONIC,
+    })
+    importMnemonicMock.mockResolvedValue({
+      publicKey: `0x${'cd'.repeat(32)}`,
+      parameterSet: 'SLH-DSA-SHA2-128s',
+      mnemonic: MNEMONIC,
+    })
+    exportMnemonicMock.mockResolvedValue(MNEMONIC)
     deriveIdentityMock.mockResolvedValue({
       address: 'ckt1qq',
       lockArgs: `0x${'11'.repeat(32)}`,
@@ -214,5 +232,127 @@ describe('SlhDsaWalletsController', () => {
         controller.importWatchOnly({ name: 'watch', publicKey: '0xabcd', parameterSet: 'SLH-DSA-SHA2-128s' })
       ).rejects.toThrow(/public key/i)
     })
+  })
+})
+
+describe('SlhDsaWalletsController recovery phrases', () => {
+  const controller = new SlhDsaWalletsController()
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    getCurrentNetworkMock.mockReturnValue(network)
+    walletCreateMock.mockReturnValue({ id: 'w1', name: 'pq', toJSON: () => ({ id: 'w1', name: 'pq' }) })
+    createMock.mockResolvedValue({
+      publicKey: `0x${'cd'.repeat(32)}`,
+      parameterSet: 'SLH-DSA-SHA2-128s',
+      mnemonic: MNEMONIC,
+    })
+    importMnemonicMock.mockResolvedValue({
+      publicKey: `0x${'cd'.repeat(32)}`,
+      parameterSet: 'SLH-DSA-SHA2-128s',
+      mnemonic: MNEMONIC,
+    })
+    exportMnemonicMock.mockResolvedValue(MNEMONIC)
+    deriveIdentityMock.mockResolvedValue({
+      address: 'ckt1qq',
+      lockArgs: `0x${'11'.repeat(32)}`,
+      lockCodeHash: `0x${'a1'.repeat(32)}`,
+      lockHashType: 'data1',
+      addressType: 0,
+      addressIndex: 0,
+      providerId: 'slh-dsa-fips205',
+      metadata: { parameterSet: 'SLH-DSA-SHA2-128s' },
+      isWatchOnly: () => false,
+    })
+  })
+
+  it('hands the new wallet its recovery phrase', async () => {
+    const { result } = await controller.createWallet({
+      name: 'pq',
+      password: 'a strong enough password',
+      parameterSet: 'SLH-DSA-SHA2-128s',
+    })
+
+    expect(result?.mnemonic).toBe(MNEMONIC)
+  })
+
+  it('imports a wallet from a recovery phrase', async () => {
+    const { status, result } = await controller.importMnemonic({
+      name: 'restored',
+      password: 'a strong enough password',
+      parameterSet: 'SLH-DSA-SHA2-128s',
+      mnemonic: MNEMONIC,
+    })
+
+    expect(status).toBe(ResponseCode.Success)
+    expect(result?.id).toBe('w1')
+    expect(importMnemonicMock).toHaveBeenCalledWith(
+      expect.objectContaining({ walletId: 'w1', mnemonic: MNEMONIC, parameterSet: 'SLH-DSA-SHA2-128s' }),
+      undefined
+    )
+  })
+
+  it('does not echo the phrase back after importing it', async () => {
+    // The renderer already has it; sending it back is a copy of the wallet crossing the boundary
+    // for no reason, and it would end up in whatever the caller logs.
+    const { result } = await controller.importMnemonic({
+      name: 'restored',
+      password: 'a strong enough password',
+      parameterSet: 'SLH-DSA-SHA2-128s',
+      mnemonic: MNEMONIC,
+    })
+
+    expect(JSON.stringify(result)).not.toContain('word0')
+  })
+
+  it('removes the wallet record if importing the phrase fails', async () => {
+    importMnemonicMock.mockRejectedValue(new Error('phrase 2 of 3 is not a valid BIP39 phrase'))
+
+    await expect(
+      controller.importMnemonic({
+        name: 'restored',
+        password: 'a strong enough password',
+        parameterSet: 'SLH-DSA-SHA2-128s',
+        mnemonic: MNEMONIC,
+      })
+    ).rejects.toThrow(/phrase 2/)
+    expect(walletDeleteMock).toHaveBeenCalledWith('w1')
+  })
+
+  it('rejects an unknown parameter set before creating anything', async () => {
+    await expect(
+      controller.importMnemonic({
+        name: 'restored',
+        password: 'a strong enough password',
+        parameterSet: 'SLH-DSA-NOPE',
+        mnemonic: MNEMONIC,
+      })
+    ).rejects.toThrow(/parameter set/i)
+    expect(walletCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('requires a password to import', async () => {
+    await expect(
+      controller.importMnemonic({
+        name: 'restored',
+        password: '',
+        parameterSet: 'SLH-DSA-SHA2-128s',
+        mnemonic: MNEMONIC,
+      })
+    ).rejects.toThrow(/password/i)
+    expect(walletCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('shows the phrase again behind the password', async () => {
+    const { status, result } = await controller.exportMnemonic({ walletID: 'w1', password: 'a strong enough password' })
+
+    expect(status).toBe(ResponseCode.Success)
+    expect(result).toBe(MNEMONIC)
+    expect(exportMnemonicMock).toHaveBeenCalledWith('w1', 'a strong enough password')
+  })
+
+  it('will not show the phrase without a password', async () => {
+    await expect(controller.exportMnemonic({ walletID: 'w1', password: '' })).rejects.toThrow(/password/i)
+    expect(exportMnemonicMock).not.toHaveBeenCalled()
   })
 })

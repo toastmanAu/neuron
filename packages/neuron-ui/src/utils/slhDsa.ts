@@ -52,6 +52,22 @@ export const groupParameterSets = (
   return { recommended, advanced: sets.filter(s => s.name !== recommended.name) }
 }
 
+/**
+ * Words in the recovery phrase for a parameter set: 36, 54 or 72.
+ *
+ * FIPS 205 has no BIP32, so a quantum-resistant wallet is written down as three BIP39 phrases
+ * covering its 3n byte master seed. The security level in the name fixes n, and therefore the
+ * length of each of the three.
+ *
+ * Returns undefined for a name this does not recognise. A wrong guess renders the wrong number of
+ * slots, and a phrase typed into those restores a different wallet, so nothing is better than
+ * something plausible.
+ */
+export const mnemonicWordCount = (name: string): number | undefined => {
+  const words = { '128': 12, '192': 18, '256': 24 }[name.match(/-(128|192|256)[fs]$/)?.[1] ?? '']
+  return words === undefined ? undefined : words * 3
+}
+
 /** Bytes a secp256k1 witness occupies, for comparison. */
 const SECP_WITNESS_BYTES = 93
 

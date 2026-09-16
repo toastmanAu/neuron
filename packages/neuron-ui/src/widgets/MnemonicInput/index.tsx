@@ -3,15 +3,26 @@ import mnemonicWordList from '@ckb-lumos/hd/lib/mnemonic/word_list'
 import { useDidMount } from 'utils'
 import styles from './index.module.scss'
 
+/**
+ * Words in a standard BIP39 phrase, and the default this widget renders.
+ *
+ * Quantum-resistant wallets pass 36, 54 or 72: FIPS 205 has no BIP32, so their backup is three
+ * BIP39 phrases concatenated rather than one.
+ */
+export const MNEMONIC_SENTENCE_WORDS = 12
+
 const MnemonicInput = ({
   disabled,
   words,
+  wordCount = MNEMONIC_SENTENCE_WORDS,
   inputsWords,
   onChangeInputWord,
   blankIndexes,
 }: {
   disabled?: boolean
   words: string
+  /** How many slots to render. The grid must show every position even before any are filled in. */
+  wordCount?: number
   inputsWords: string[]
   onChangeInputWord: (
     e:
@@ -26,7 +37,10 @@ const MnemonicInput = ({
 
   blankIndexes?: number[]
 }) => {
-  const wordList = useMemo(() => Object.assign(new Array(12).fill(''), words?.split(' ')), [words])
+  const wordList = useMemo(
+    () => Object.assign(new Array(wordCount).fill(''), words ? words.split(' ') : []),
+    [words, wordCount]
+  )
   const [focusIndex, setFocusIndex] = useState(-1)
   const mounted = useRef(true)
   const root = useRef<HTMLDivElement>(null)

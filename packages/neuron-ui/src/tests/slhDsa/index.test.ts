@@ -5,6 +5,7 @@ import {
   groupParameterSets,
   isAdvancedParameterSet,
   formatWitnessCost,
+  mnemonicWordCount,
 } from '../../utils/slhDsa'
 
 const sets: Controller.SlhDsaParameterSetSummary[] = [
@@ -76,5 +77,28 @@ describe('SLH-DSA parameter set presentation', () => {
       // A secp witness is 93 bytes; an SLH-DSA one is thousands. Users should see the scale.
       expect(formatWitnessCost(7921, { comparedToSecp: true })).toContain('85')
     })
+  })
+})
+
+describe('mnemonicWordCount', () => {
+  it('is 36 words for a 128-bit set', () => {
+    // Three BIP39 phrases of 12: the master seed is 3 x 16 bytes.
+    expect(mnemonicWordCount('SLH-DSA-SHA2-128s')).toBe(36)
+    expect(mnemonicWordCount('SLH-DSA-SHAKE-128f')).toBe(36)
+  })
+
+  it('is 54 words for a 192-bit set', () => {
+    expect(mnemonicWordCount('SLH-DSA-SHA2-192f')).toBe(54)
+  })
+
+  it('is 72 words for a 256-bit set', () => {
+    expect(mnemonicWordCount('SLH-DSA-SHA2-256s')).toBe(72)
+    expect(mnemonicWordCount('SLH-DSA-SHAKE-256s')).toBe(72)
+  })
+
+  it('returns undefined rather than guessing at an unknown set', () => {
+    // A wrong guess renders the wrong number of slots, and the phrase typed into it restores a
+    // different wallet. Nothing is better than something plausible here.
+    expect(mnemonicWordCount('SLH-DSA-NOPE')).toBeUndefined()
   })
 })

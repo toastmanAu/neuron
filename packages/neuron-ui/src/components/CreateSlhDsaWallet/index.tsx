@@ -2,14 +2,33 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createSlhDsaWallet, getSlhDsaParameterSets } from 'services/remote'
 import { RECOMMENDED_PARAMETER_SET, describeParameterSet, formatWitnessCost, groupParameterSets } from 'utils/slhDsa'
+import MnemonicInput from 'widgets/MnemonicInput'
+import { useInputWords } from 'components/WalletWizard/hooks'
 import type { ControllerResponse, SuccessFromController } from 'services/remote/remoteApiWrapper'
+
+/** How many words the verify step blanks out, matching the secp wizard. */
+const WORDS_TO_VERIFY = 3
+
+const pickBlankIndexes = (wordCount: number): number[] => {
+  const chosen = new Set<number>()
+  while (chosen.size < WORDS_TO_VERIFY) {
+    chosen.add(Math.floor(Math.random() * wordCount))
+  }
+  return [...chosen]
+}
 
 // A type predicate, so the response union actually narrows. Without `res is ...` the
 // compiler keeps both arms and `result` does not exist on the failure one.
 const isSuccess = <R,>(res: ControllerResponse<R>): res is SuccessFromController<R> => res.status === 1
 
+export interface CreatedSlhDsaWallet {
+  id: string
+  name: string
+  addresses: Controller.SlhDsaAddress[]
+}
+
 export interface CreateSlhDsaWalletProps {
-  onCreated: (wallet: { id: string; name: string; addresses: Controller.SlhDsaAddress[] }) => void
+  onCreated: (wallet: CreatedSlhDsaWallet) => void
 }
 
 /**
@@ -29,6 +48,16 @@ const CreateSlhDsaWallet = ({ onCreated }: CreateSlhDsaWalletProps) => {
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // The wallet exists on disk from the moment `createSlhDsaWallet` returns; these three steps are
+  // about getting the phrase onto paper before the user moves on, not about creating anything.
+  const [step, setStep] = useState<'form' | 'reveal' | 'verify'>('form')
+  const [mnemonic, setMnemonic] = useState('')
+  const [created, setCreated] = useState<CreatedSlhDsaWallet | undefined>()
+  const [blankIndexes, setBlankIndexes] = useState<number[]>([])
+
+  const wordCount = useMemo(() => mnemonic.split(' ').filter(Boolean).length, [mnemonic])
+  const { inputsWords, onChangeInput, setInputsWords } = useInputWords(wordCount || undefined)
 
   useEffect(() => {
     getSlhDsaParameterSets().then(res => {
@@ -52,7 +81,10 @@ const CreateSlhDsaWallet = ({ onCreated }: CreateSlhDsaWalletProps) => {
     try {
       const res = await createSlhDsaWallet({ name, password, parameterSet: selected })
       if (isSuccess(res) && res.result) {
-        onCreated(res.result)
+        const { mnemonic: phrase, ...wallet } = res.result
+        setMnemonic(phrase)
+        setCreated(wallet)
+        setStep('reveal')
         return
       }
       const { message } = res as { message?: string | { content?: string } }
@@ -60,7 +92,68 @@ const CreateSlhDsaWallet = ({ onCreated }: CreateSlhDsaWalletProps) => {
     } finally {
       setBusy(false)
     }
-  }, [name, password, selected, onCreated])
+  }, [name, password, selected])
+
+  const startVerifying = useCallback(() => {
+    const words = mnemonic.split(' ')
+    const blanks = pickBlankIndexes(words.length)
+    setBlankIndexes(blanks)
+    setInputsWords(words.map((word, index) => (blanks.includes(index) ? '' : word)))
+    setStep('verify')
+  }, [mnemonic, setInputsWords])
+
+  // Compared against the phrase rather than against the three blanked words on their own, so a
+  // wrong word anywhere fails, not just a wrong word in a slot we happened to blank.
+  const verified = inputsWords.join(' ') === mnemonic
+
+  const finish = useCallback(() => {
+    if (created) {
+      // The phrase stops here. Everything past creation works from the wallet record, and passing
+      // it on would put a second copy of the wallet into application state.
+      onCreated(created)
+    }
+  }, [created, onCreated])
+
+  if (step === 'reveal') {
+    return (
+      <div>
+        <h2>{t('slh-dsa.create.phrase-title')}</h2>
+        <p data-testid="phrase-warning">{t('slh-dsa.create.phrase-warning')}</p>
+        <div data-testid="recovery-phrase">
+          <MnemonicInput
+            disabled
+            words={mnemonic}
+            wordCount={wordCount}
+            inputsWords={[]}
+            onChangeInputWord={() => {}}
+          />
+        </div>
+        <button type="button" data-testid="phrase-continue" onClick={startVerifying}>
+          {t('slh-dsa.create.phrase-continue')}
+        </button>
+      </div>
+    )
+  }
+
+  if (step === 'verify') {
+    return (
+      <div>
+        <h2>{t('slh-dsa.create.verify-title')}</h2>
+        <div data-testid="verify-phrase">
+          <MnemonicInput
+            words={mnemonic}
+            wordCount={wordCount}
+            inputsWords={inputsWords}
+            blankIndexes={blankIndexes}
+            onChangeInputWord={onChangeInput}
+          />
+        </div>
+        <button type="button" data-testid="verify-continue" disabled={!verified} onClick={finish}>
+          {t('slh-dsa.create.verify-continue')}
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div>

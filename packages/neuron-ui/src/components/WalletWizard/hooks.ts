@@ -1,9 +1,14 @@
 import { useState, useCallback } from 'react'
+import { MNEMONIC_SENTENCE_WORDS } from 'widgets/MnemonicInput'
 
-const MNEMONIC_SENTENCE_WORDS = 12
-
-export const useInputWords = () => {
-  const [inputsWords, setInputsWords] = useState<string[]>(new Array(MNEMONIC_SENTENCE_WORDS).fill(''))
+/**
+ * Backing state for a mnemonic grid.
+ *
+ * `wordCount` defaults to a standard BIP39 phrase. Quantum-resistant wallets pass 36, 54 or 72:
+ * FIPS 205 has no BIP32, so their backup is three BIP39 phrases concatenated.
+ */
+export const useInputWords = (wordCount: number = MNEMONIC_SENTENCE_WORDS) => {
+  const [inputsWords, setInputsWords] = useState<string[]>(new Array(wordCount).fill(''))
   const onChangeInput = useCallback(
     (
       e:
@@ -23,7 +28,7 @@ export const useInputWords = () => {
           .trim()
           .replace(/[^0-9a-z]+/g, ' ')
           .split(' ')
-        if (list.length === MNEMONIC_SENTENCE_WORDS) {
+        if (list.length === wordCount) {
           setInputsWords(list)
           return
         }
@@ -35,7 +40,7 @@ export const useInputWords = () => {
         return newWords
       })
     },
-    [setInputsWords]
+    [setInputsWords, wordCount]
   )
   return {
     inputsWords,

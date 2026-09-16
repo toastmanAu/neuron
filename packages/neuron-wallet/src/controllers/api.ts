@@ -379,6 +379,14 @@ export default class ApiController {
       return this.#slhDsaWalletsController.createWallet(params)
     })
 
+    handle('import-slh-dsa-mnemonic', async (_, params: Controller.ImportSlhDsaMnemonicParams) => {
+      return this.#slhDsaWalletsController.importMnemonic(params)
+    })
+
+    handle('export-slh-dsa-mnemonic', async (_, params: { walletID: string; password: string }) => {
+      return this.#slhDsaWalletsController.exportMnemonic(params)
+    })
+
     handle('get-slh-dsa-addresses', async (_, params: { walletID: string }) => {
       return this.#slhDsaWalletsController.getAddresses(params)
     })

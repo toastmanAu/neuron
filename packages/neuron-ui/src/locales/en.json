@@ -1390,7 +1390,12 @@
         "submit": "Create wallet",
         "slow": "slow to sign",
         "signing-takes-seconds": "Signing with a quantum-resistant key takes a few seconds. Neuron will appear busy while it works.",
-        "slow-signing-warning": "This parameter set is several times slower to sign than the SHA2 sets, with no extra security in this context."
+        "slow-signing-warning": "This parameter set is several times slower to sign than the SHA2 sets, with no extra security in this context.",
+        "phrase-title": "Write down your recovery phrase",
+        "phrase-warning": "These 36 words are your wallet. Anyone who has them can spend from it, and nobody can recover it for you if you lose them. Write them down in order and keep them off this computer.",
+        "phrase-continue": "I have written it down",
+        "verify-title": "Check your recovery phrase",
+        "verify-continue": "Confirm"
       },
       "receive": {
         "title": "Quantum-resistant address",
@@ -1411,7 +1416,12 @@
         "watch-only-note": "A watch-only wallet holds no key. It can show a balance and receive, but cannot sign.",
         "submit": "Import wallet",
         "failed": "Could not import the wallet",
-        "unreadable-file": "That file could not be read"
+        "unreadable-file": "That file could not be read",
+        "from-mnemonic": "A recovery phrase",
+        "mnemonic": "Recovery phrase",
+        "mnemonic-note": "A quantum-resistant wallet is backed up as three BIP39 phrases: 36, 54 or 72 words depending on the parameter set. Enter them in order.",
+        "password": "Password",
+        "confirm": "Confirm password"
       }
     }
   }

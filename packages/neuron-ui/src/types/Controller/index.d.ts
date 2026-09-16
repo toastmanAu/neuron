@@ -456,6 +456,13 @@ declare namespace Controller {
     parameterSet: string
   }
 
+  interface ImportSlhDsaMnemonicParams {
+    name: string
+    password: string
+    parameterSet: string
+    mnemonic: string
+  }
+
   interface ImportSlhDsaWatchOnlyParams {
     name: string
     publicKey: string
