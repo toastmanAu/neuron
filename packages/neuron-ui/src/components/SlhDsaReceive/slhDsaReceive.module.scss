@@ -1,0 +1,65 @@
+@import '../../styles/mixin.scss';
+
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 32px;
+  color: var(--main-text-color);
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 500;
+  margin: 0 0 16px 0;
+}
+
+.qrCode {
+  padding: 12px;
+  background: var(--main-background-color);
+  border: 1px solid var(--divide-line-color);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.address {
+  word-break: break-all;
+  text-align: center;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 18px;
+  max-width: 420px;
+}
+
+.meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 16px 0 0 0;
+  font-size: 12px;
+
+  dt {
+    color: var(--secondary-text-color);
+    margin: 0;
+  }
+
+  dd {
+    margin: 0;
+    font-weight: 500;
+  }
+}
+
+.notices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0 0 0;
+  padding: 0;
+  max-width: 420px;
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+}

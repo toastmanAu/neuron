@@ -28,7 +28,7 @@ const PHRASE_36 = [
 ].join(' ')
 
 const chooseMnemonicMode = () => {
-  fireEvent.click(screen.getByLabelText('slh-dsa.import.from-mnemonic'))
+  fireEvent.click(screen.getByLabelText('slh-dsa.import.from-mnemonic', { selector: 'input' }))
 }
 
 const typePhrase = (phrase: string) => {
@@ -57,9 +57,9 @@ describe('ImportSlhDsaWallet', () => {
     render(<ImportSlhDsaWallet onImported={onImported} />)
 
     // A recovery phrase is now the default route, so the backup one has to be chosen.
-    fireEvent.click(screen.getByLabelText('slh-dsa.import.from-backup'))
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.name'), { target: { value: 'restored' } })
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.backup'), { target: { value: '{"vault":1}' } })
+    fireEvent.click(screen.getByLabelText('slh-dsa.import.from-backup', { selector: 'input' }))
+    fireEvent.change(screen.getByTestId('import-name'), { target: { value: 'restored' } })
+    fireEvent.change(screen.getByTestId('backup'), { target: { value: '{"vault":1}' } })
     fireEvent.click(screen.getByText('slh-dsa.import.submit'))
 
     await waitFor(() => expect(onImported).toHaveBeenCalledWith({ id: 'w1', name: 'restored' }))
@@ -71,9 +71,9 @@ describe('ImportSlhDsaWallet', () => {
     importSlhDsaWatchOnly.mockResolvedValue({ status: 1, result: { id: 'w2', name: 'watched' } })
     render(<ImportSlhDsaWallet onImported={vi.fn()} />)
 
-    fireEvent.click(screen.getByLabelText(/watch-only/i, { selector: 'input' }))
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.name'), { target: { value: 'watched' } })
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.public-key'), { target: { value: '0xabcd' } })
+    fireEvent.click(screen.getByLabelText('slh-dsa.import.watch-only', { selector: 'input' }))
+    fireEvent.change(screen.getByTestId('import-name'), { target: { value: 'watched' } })
+    fireEvent.change(screen.getByTestId('public-key'), { target: { value: '0xabcd' } })
     fireEvent.click(screen.getByText('slh-dsa.import.submit'))
 
     await waitFor(() =>
@@ -88,9 +88,9 @@ describe('ImportSlhDsaWallet', () => {
     const onImported = vi.fn()
     render(<ImportSlhDsaWallet onImported={onImported} />)
 
-    fireEvent.click(screen.getByLabelText('slh-dsa.import.from-backup'))
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.name'), { target: { value: 'x' } })
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.backup'), { target: { value: 'nonsense' } })
+    fireEvent.click(screen.getByLabelText('slh-dsa.import.from-backup', { selector: 'input' }))
+    fireEvent.change(screen.getByTestId('import-name'), { target: { value: 'x' } })
+    fireEvent.change(screen.getByTestId('backup'), { target: { value: 'nonsense' } })
     fireEvent.click(screen.getByText('slh-dsa.import.submit'))
 
     expect(await screen.findByTestId('import-error')).toHaveTextContent('that vault is corrupt')
@@ -116,7 +116,7 @@ describe('ImportSlhDsaWallet from a recovery phrase', () => {
     render(<ImportSlhDsaWallet onImported={vi.fn()} />)
     chooseMnemonicMode()
 
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.parameter-set'), {
+    fireEvent.change(screen.getByTestId('mnemonic-parameter-set'), {
       target: { value: 'SLH-DSA-SHA2-256s' },
     })
 
@@ -127,9 +127,9 @@ describe('ImportSlhDsaWallet from a recovery phrase', () => {
   it('will not submit until every slot is filled', () => {
     render(<ImportSlhDsaWallet onImported={vi.fn()} />)
     chooseMnemonicMode()
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.name'), { target: { value: 'restored' } })
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.password'), { target: { value: 'a-good-password' } })
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.confirm'), { target: { value: 'a-good-password' } })
+    fireEvent.change(screen.getByTestId('import-name'), { target: { value: 'restored' } })
+    fireEvent.change(screen.getByTestId('import-password'), { target: { value: 'A-good-password1' } })
+    fireEvent.change(screen.getByTestId('import-confirm'), { target: { value: 'A-good-password1' } })
 
     typePhrase(PHRASE_36.split(' ').slice(0, 35).join(' '))
 
@@ -139,9 +139,9 @@ describe('ImportSlhDsaWallet from a recovery phrase', () => {
   it('will not submit when the password confirmation does not match', () => {
     render(<ImportSlhDsaWallet onImported={vi.fn()} />)
     chooseMnemonicMode()
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.name'), { target: { value: 'restored' } })
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.password'), { target: { value: 'a-good-password' } })
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.confirm'), { target: { value: 'different' } })
+    fireEvent.change(screen.getByTestId('import-name'), { target: { value: 'restored' } })
+    fireEvent.change(screen.getByTestId('import-password'), { target: { value: 'A-good-password1' } })
+    fireEvent.change(screen.getByTestId('import-confirm'), { target: { value: 'different' } })
     typePhrase(PHRASE_36)
 
     expect(screen.getByText('slh-dsa.import.submit').closest('button')).toBeDisabled()
@@ -151,9 +151,9 @@ describe('ImportSlhDsaWallet from a recovery phrase', () => {
     const onImported = vi.fn()
     render(<ImportSlhDsaWallet onImported={onImported} />)
     chooseMnemonicMode()
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.name'), { target: { value: 'restored' } })
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.password'), { target: { value: 'a-good-password' } })
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.confirm'), { target: { value: 'a-good-password' } })
+    fireEvent.change(screen.getByTestId('import-name'), { target: { value: 'restored' } })
+    fireEvent.change(screen.getByTestId('import-password'), { target: { value: 'A-good-password1' } })
+    fireEvent.change(screen.getByTestId('import-confirm'), { target: { value: 'A-good-password1' } })
     typePhrase(PHRASE_36)
 
     fireEvent.click(screen.getByText('slh-dsa.import.submit'))
@@ -161,7 +161,7 @@ describe('ImportSlhDsaWallet from a recovery phrase', () => {
     await waitFor(() =>
       expect(importSlhDsaMnemonic).toHaveBeenCalledWith({
         name: 'restored',
-        password: 'a-good-password',
+        password: 'A-good-password1',
         parameterSet: 'SLH-DSA-SHA2-128s',
         mnemonic: PHRASE_36,
       })
@@ -177,9 +177,9 @@ describe('ImportSlhDsaWallet from a recovery phrase', () => {
     const onImported = vi.fn()
     render(<ImportSlhDsaWallet onImported={onImported} />)
     chooseMnemonicMode()
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.name'), { target: { value: 'restored' } })
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.password'), { target: { value: 'a-good-password' } })
-    fireEvent.change(screen.getByLabelText('slh-dsa.import.confirm'), { target: { value: 'a-good-password' } })
+    fireEvent.change(screen.getByTestId('import-name'), { target: { value: 'restored' } })
+    fireEvent.change(screen.getByTestId('import-password'), { target: { value: 'A-good-password1' } })
+    fireEvent.change(screen.getByTestId('import-confirm'), { target: { value: 'A-good-password1' } })
     typePhrase(PHRASE_36)
 
     fireEvent.click(screen.getByText('slh-dsa.import.submit'))

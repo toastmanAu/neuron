@@ -1,10 +1,22 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { importSlhDsaBackup, importSlhDsaMnemonic, importSlhDsaWatchOnly } from 'services/remote'
+import Alert from 'widgets/Alert'
+import Button from 'widgets/Button'
+import TextField from 'widgets/TextField'
+import RadioGroup from 'widgets/RadioGroup'
 import MnemonicInput from 'widgets/MnemonicInput'
+import { getAlertStatus } from 'components/WalletWizard'
 import { useInputWords } from 'components/WalletWizard/hooks'
 import { mnemonicWordCount } from 'utils/slhDsa'
+import { validatePasswordComplexity } from 'utils'
+import { MAX_PASSWORD_LENGTH, MAX_WALLET_NAME_LENGTH } from 'utils/const'
 import type { ControllerResponse, SuccessFromController } from 'services/remote/remoteApiWrapper'
+import styles from './importSlhDsaWallet.module.scss'
+
+/** TextField's props carry a `[key: string]: any` index signature, which defeats inference on
+ * its own `onChange`, so the handler parameter has to be named. */
+type FieldChangeEvent = React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
 
 // A type predicate, so the response union actually narrows. Without `res is ...` the
 // compiler keeps both arms and `result` does not exist on the failure one.
@@ -12,6 +24,11 @@ const isSuccess = <R,>(res: ControllerResponse<R>): res is SuccessFromController
 
 export interface ImportSlhDsaWalletProps {
   onImported: (wallet: { id: string; name: string }) => void
+  /**
+   * Supplied by the route wrapper. The form stays router-free, but the back control belongs in the
+   * same action row as the primary one, which is where every other Neuron form puts it.
+   */
+  onBack?: () => void
 }
 
 type Mode = 'mnemonic' | 'backup' | 'watch-only'
@@ -29,7 +46,7 @@ type Mode = 'mnemonic' | 'backup' | 'watch-only'
  * lock args are a hash of the set together with the public key, and cannot be recovered from an
  * address.
  */
-const ImportSlhDsaWallet = ({ onImported }: ImportSlhDsaWalletProps) => {
+const ImportSlhDsaWallet = ({ onImported, onBack }: ImportSlhDsaWalletProps) => {
   const [t] = useTranslation()
   const [mode, setMode] = useState<Mode>('mnemonic')
   const [name, setName] = useState('')
@@ -48,6 +65,15 @@ const ImportSlhDsaWallet = ({ onImported }: ImportSlhDsaWalletProps) => {
   const mnemonic = inputsWords.slice(0, wordCount ?? 0).join(' ')
   const phraseComplete = Boolean(wordCount) && inputsWords.slice(0, wordCount).every(Boolean)
 
+  const passwordIsComplex = useMemo(() => {
+    try {
+      return validatePasswordComplexity(password)
+    } catch {
+      return false
+    }
+  }, [password])
+  const passwordsMatch = Boolean(password) && password === confirm
+
   const readFile = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0]
@@ -60,86 +86,111 @@ const ImportSlhDsaWallet = ({ onImported }: ImportSlhDsaWalletProps) => {
     [t]
   )
 
-  const submit = useCallback(async () => {
-    setError('')
-    setBusy(true)
-    try {
-      const importing = {
-        mnemonic: () => importSlhDsaMnemonic({ name, password, parameterSet, mnemonic }),
-        backup: () => importSlhDsaBackup({ name, backup }),
-        'watch-only': () => importSlhDsaWatchOnly({ name, publicKey, parameterSet }),
-      }[mode]
-      const res = await importing()
-      if (isSuccess(res) && res.result) {
-        onImported(res.result)
-        return
-      }
-      const { message } = res as { message?: string | { content?: string } }
-      setError(typeof message === 'string' ? message : message?.content ?? t('slh-dsa.import.failed'))
-    } finally {
-      setBusy(false)
-    }
-  }, [mode, name, backup, publicKey, parameterSet, password, mnemonic, onImported, t])
-
   const enoughToImport = {
-    mnemonic: phraseComplete && Boolean(password) && password === confirm,
+    mnemonic: phraseComplete && passwordIsComplex && passwordsMatch,
     backup: Boolean(backup),
     'watch-only': Boolean(publicKey),
   }[mode]
   const canSubmit = Boolean(name) && !busy && enoughToImport
 
+  const submit = useCallback(
+    async (event?: React.FormEvent) => {
+      event?.preventDefault()
+      if (!canSubmit) {
+        return
+      }
+      setError('')
+      setBusy(true)
+      try {
+        const importing = {
+          mnemonic: () => importSlhDsaMnemonic({ name, password, parameterSet, mnemonic }),
+          backup: () => importSlhDsaBackup({ name, backup }),
+          'watch-only': () => importSlhDsaWatchOnly({ name, publicKey, parameterSet }),
+        }[mode]
+        const res = await importing()
+        if (isSuccess(res) && res.result) {
+          onImported(res.result)
+          return
+        }
+        const { message } = res as { message?: string | { content?: string } }
+        setError(typeof message === 'string' ? message : message?.content ?? t('slh-dsa.import.failed'))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [canSubmit, mode, name, backup, publicKey, parameterSet, password, mnemonic, onImported, t]
+  )
+
   return (
-    <div>
-      <h2>{t('slh-dsa.import.title')}</h2>
+    <form className={styles.container} onSubmit={submit}>
+      <h2 className={styles.title}>{t('slh-dsa.import.title')}</h2>
 
-      <label htmlFor="pq-import-name">{t('slh-dsa.import.name')}</label>
-      <input id="pq-import-name" value={name} onChange={e => setName(e.target.value)} />
+      <TextField
+        className={styles.field}
+        field="pq-import-name"
+        data-testid="import-name"
+        label={t('slh-dsa.import.name')}
+        value={name}
+        maxLength={MAX_WALLET_NAME_LENGTH}
+        onChange={(e: FieldChangeEvent) => setName(e.target.value)}
+        required
+      />
 
-      <fieldset>
-        <legend>{t('slh-dsa.import.mode')}</legend>
-        <label htmlFor="pq-mode-mnemonic">
-          <input
-            id="pq-mode-mnemonic"
-            type="radio"
-            checked={mode === 'mnemonic'}
-            onChange={() => setMode('mnemonic')}
-          />
-          {t('slh-dsa.import.from-mnemonic')}
-        </label>
-        <label htmlFor="pq-mode-backup">
-          <input id="pq-mode-backup" type="radio" checked={mode === 'backup'} onChange={() => setMode('backup')} />
-          {t('slh-dsa.import.from-backup')}
-        </label>
-        <label htmlFor="pq-mode-watch">
-          <input
-            id="pq-mode-watch"
-            type="radio"
-            checked={mode === 'watch-only'}
-            onChange={() => setMode('watch-only')}
-          />
-          {t('slh-dsa.import.watch-only')}
-        </label>
-      </fieldset>
+      <RadioGroup
+        inputIdPrefix="pq-mode"
+        value={mode}
+        onChange={value => setMode(value as Mode)}
+        options={[
+          { value: 'mnemonic', label: t('slh-dsa.import.from-mnemonic') },
+          { value: 'backup', label: t('slh-dsa.import.from-backup') },
+          { value: 'watch-only', label: t('slh-dsa.import.watch-only') },
+        ]}
+      />
 
       {mode === 'mnemonic' ? (
         <>
-          <label htmlFor="pq-mnemonic-parameter-set">{t('slh-dsa.import.parameter-set')}</label>
-          <input id="pq-mnemonic-parameter-set" value={parameterSet} onChange={e => setParameterSet(e.target.value)} />
-
-          <label htmlFor="pq-mnemonic-password">{t('slh-dsa.import.password')}</label>
-          <input
-            id="pq-mnemonic-password"
+          <TextField
+            className={styles.field}
+            field="pq-mnemonic-parameter-set"
+            data-testid="mnemonic-parameter-set"
+            label={t('slh-dsa.import.parameter-set')}
+            value={parameterSet}
+            onChange={(e: FieldChangeEvent) => setParameterSet(e.target.value)}
+            required
+          />
+          <TextField
+            className={styles.field}
+            field="pq-mnemonic-password"
+            data-testid="import-password"
             type="password"
+            label={t('slh-dsa.import.password')}
             value={password}
-            onChange={e => setPassword(e.target.value)}
+            maxLength={MAX_PASSWORD_LENGTH}
+            onChange={(e: FieldChangeEvent) => setPassword(e.target.value)}
+            required
+          />
+          <TextField
+            className={styles.field}
+            field="pq-mnemonic-confirm"
+            data-testid="import-confirm"
+            type="password"
+            label={t('slh-dsa.import.confirm')}
+            value={confirm}
+            maxLength={MAX_PASSWORD_LENGTH}
+            onChange={(e: FieldChangeEvent) => setConfirm(e.target.value)}
+            required
           />
 
-          <label htmlFor="pq-mnemonic-confirm">{t('slh-dsa.import.confirm')}</label>
-          <input id="pq-mnemonic-confirm" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} />
+          <ul className={styles.notices}>
+            <Alert status={getAlertStatus(!!password, passwordIsComplex)}>{t('wizard.complex-password')}</Alert>
+            <Alert status={getAlertStatus(!!confirm, passwordsMatch)}>{t('wizard.same-password')}</Alert>
+          </ul>
 
-          <p data-testid="mnemonic-note">{t('slh-dsa.import.mnemonic-note')}</p>
+          <p className={styles.hint} data-testid="mnemonic-note">
+            {t('slh-dsa.import.mnemonic-note')}
+          </p>
           {wordCount ? (
-            <div data-testid="mnemonic-grid">
+            <div className={styles.grid} data-testid="mnemonic-grid">
               <MnemonicInput
                 words=""
                 wordCount={wordCount}
@@ -153,32 +204,72 @@ const ImportSlhDsaWallet = ({ onImported }: ImportSlhDsaWalletProps) => {
 
       {mode === 'backup' ? (
         <>
-          <input
+          <TextField
+            className={styles.field}
+            field="pq-backup-file"
+            data-testid="backup-file"
             type="file"
+            label={t('slh-dsa.import.select-file')}
             accept="application/json"
-            aria-label={t('slh-dsa.import.select-file')}
             onChange={readFile}
           />
-          <textarea aria-label={t('slh-dsa.import.backup')} value={backup} onChange={e => setBackup(e.target.value)} />
+          <TextField
+            className={styles.field}
+            field="pq-backup"
+            data-testid="backup"
+            label={t('slh-dsa.import.backup')}
+            rows={4}
+            value={backup}
+            onChange={(e: FieldChangeEvent) => setBackup(e.target.value)}
+          />
         </>
       ) : null}
 
       {mode === 'watch-only' ? (
         <>
-          <label htmlFor="pq-public-key">{t('slh-dsa.import.public-key')}</label>
-          <input id="pq-public-key" value={publicKey} onChange={e => setPublicKey(e.target.value)} />
-          <label htmlFor="pq-parameter-set">{t('slh-dsa.import.parameter-set')}</label>
-          <input id="pq-parameter-set" value={parameterSet} onChange={e => setParameterSet(e.target.value)} />
-          <p data-testid="watch-only-note">{t('slh-dsa.import.watch-only-note')}</p>
+          <TextField
+            className={styles.field}
+            field="pq-public-key"
+            data-testid="public-key"
+            label={t('slh-dsa.import.public-key')}
+            value={publicKey}
+            onChange={(e: FieldChangeEvent) => setPublicKey(e.target.value)}
+            required
+          />
+          <TextField
+            className={styles.field}
+            field="pq-parameter-set"
+            data-testid="watch-parameter-set"
+            label={t('slh-dsa.import.parameter-set')}
+            value={parameterSet}
+            onChange={(e: FieldChangeEvent) => setParameterSet(e.target.value)}
+            required
+          />
+          <p className={styles.hint} data-testid="watch-only-note">
+            {t('slh-dsa.import.watch-only-note')}
+          </p>
         </>
       ) : null}
 
-      {error ? <p data-testid="import-error">{error}</p> : null}
+      {error ? (
+        <ul className={styles.notices}>
+          <Alert status="error" data-testid="import-error">
+            {error}
+          </Alert>
+        </ul>
+      ) : null}
 
-      <button type="button" disabled={!canSubmit} onClick={submit}>
-        {t('slh-dsa.import.submit')}
-      </button>
-    </div>
+      <div className={styles.actions}>
+        <Button
+          type="submit"
+          label={t('slh-dsa.import.submit')}
+          disabled={!canSubmit}
+          loading={busy}
+          onClick={submit}
+        />
+        {onBack ? <Button type="text" data-testid="back" label={t('common.back')} onClick={onBack} /> : null}
+      </div>
+    </form>
   )
 }
 

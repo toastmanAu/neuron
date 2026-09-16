@@ -2,9 +2,24 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createSlhDsaWallet, getSlhDsaParameterSets } from 'services/remote'
 import { RECOMMENDED_PARAMETER_SET, describeParameterSet, formatWitnessCost, groupParameterSets } from 'utils/slhDsa'
+import { validatePasswordComplexity } from 'utils'
+import { MAX_PASSWORD_LENGTH, MAX_WALLET_NAME_LENGTH } from 'utils/const'
+import Alert from 'widgets/Alert'
+import Button from 'widgets/Button'
+import TextField from 'widgets/TextField'
 import MnemonicInput from 'widgets/MnemonicInput'
+import { getAlertStatus } from 'components/WalletWizard'
 import { useInputWords } from 'components/WalletWizard/hooks'
 import type { ControllerResponse, SuccessFromController } from 'services/remote/remoteApiWrapper'
+import styles from './createSlhDsaWallet.module.scss'
+
+/** TextField's props carry a `[key: string]: any` index signature, which defeats inference on
+ * its own `onChange`, so the handler parameter has to be named. */
+type FieldChangeEvent = React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+
+// A type predicate, so the response union actually narrows. Without `res is ...` the
+// compiler keeps both arms and `result` does not exist on the failure one.
+const isSuccess = <R,>(res: ControllerResponse<R>): res is SuccessFromController<R> => res.status === 1
 
 /** How many words the verify step blanks out, matching the secp wizard. */
 const WORDS_TO_VERIFY = 3
@@ -17,10 +32,6 @@ const pickBlankIndexes = (wordCount: number): number[] => {
   return [...chosen]
 }
 
-// A type predicate, so the response union actually narrows. Without `res is ...` the
-// compiler keeps both arms and `result` does not exist on the failure one.
-const isSuccess = <R,>(res: ControllerResponse<R>): res is SuccessFromController<R> => res.status === 1
-
 export interface CreatedSlhDsaWallet {
   id: string
   name: string
@@ -29,6 +40,11 @@ export interface CreatedSlhDsaWallet {
 
 export interface CreateSlhDsaWalletProps {
   onCreated: (wallet: CreatedSlhDsaWallet) => void
+  /**
+   * Supplied by the route wrapper. The form stays router-free, but the back control belongs in the
+   * same action row as the primary one, which is where every other Neuron form puts it.
+   */
+  onBack?: () => void
 }
 
 /**
@@ -37,8 +53,11 @@ export interface CreateSlhDsaWalletProps {
  * Two things are surfaced that a secp wallet never has to mention, because both change what the
  * user experiences: every signature is kilobytes rather than 65 bytes, and signing takes seconds
  * rather than milliseconds. Saying so before the wallet exists is cheaper than explaining it after.
+ *
+ * The phrase is then shown and asked for again, following the secp wizard rather than adding a
+ * second convention — same grid, same three blanked words.
  */
-const CreateSlhDsaWallet = ({ onCreated }: CreateSlhDsaWalletProps) => {
+const CreateSlhDsaWallet = ({ onCreated, onBack }: CreateSlhDsaWalletProps) => {
   const [t] = useTranslation()
   const [sets, setSets] = useState<Controller.SlhDsaParameterSetSummary[]>([])
   const [selected, setSelected] = useState<string>(RECOMMENDED_PARAMETER_SET)
@@ -73,26 +92,44 @@ const CreateSlhDsaWallet = ({ onCreated }: CreateSlhDsaWalletProps) => {
   const current = useMemo(() => sets.find(s => s.name === selected), [sets, selected])
   const description = current ? describeParameterSet(current) : undefined
 
-  const canSubmit = Boolean(name && password && password === confirm && !busy)
-
-  const submit = useCallback(async () => {
-    setError('')
-    setBusy(true)
+  // The same rule every other Neuron wallet is held to. It would be absurd for the wallet chosen
+  // for its resistance to a future attacker to accept a weaker password than a secp one.
+  const passwordIsComplex = useMemo(() => {
     try {
-      const res = await createSlhDsaWallet({ name, password, parameterSet: selected })
-      if (isSuccess(res) && res.result) {
-        const { mnemonic: phrase, ...wallet } = res.result
-        setMnemonic(phrase)
-        setCreated(wallet)
-        setStep('reveal')
+      return validatePasswordComplexity(password)
+    } catch {
+      return false
+    }
+  }, [password])
+  const passwordsMatch = Boolean(password) && password === confirm
+
+  const canSubmit = Boolean(name) && passwordIsComplex && passwordsMatch && !busy
+
+  const submit = useCallback(
+    async (event?: React.FormEvent) => {
+      event?.preventDefault()
+      if (!canSubmit) {
         return
       }
-      const { message } = res as { message?: string | { content?: string } }
-      setError(typeof message === 'string' ? message : message?.content ?? 'Could not create the wallet')
-    } finally {
-      setBusy(false)
-    }
-  }, [name, password, selected])
+      setError('')
+      setBusy(true)
+      try {
+        const res = await createSlhDsaWallet({ name, password, parameterSet: selected })
+        if (isSuccess(res) && res.result) {
+          const { mnemonic: phrase, ...wallet } = res.result
+          setMnemonic(phrase)
+          setCreated(wallet)
+          setStep('reveal')
+          return
+        }
+        const { message } = res as { message?: string | { content?: string } }
+        setError(typeof message === 'string' ? message : message?.content ?? t('slh-dsa.create.failed'))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [canSubmit, name, password, selected, t]
+  )
 
   const startVerifying = useCallback(() => {
     const words = mnemonic.split(' ')
@@ -116,9 +153,11 @@ const CreateSlhDsaWallet = ({ onCreated }: CreateSlhDsaWalletProps) => {
 
   if (step === 'reveal') {
     return (
-      <div>
-        <h2>{t('slh-dsa.create.phrase-title')}</h2>
-        <p data-testid="phrase-warning">{t('slh-dsa.create.phrase-warning')}</p>
+      <div className={styles.container}>
+        <h2 className={styles.title}>{t('slh-dsa.create.phrase-title')}</h2>
+        <p className={styles.hint} data-testid="phrase-warning">
+          {t('slh-dsa.create.phrase-warning')}
+        </p>
         <div data-testid="recovery-phrase">
           <MnemonicInput
             disabled
@@ -128,17 +167,23 @@ const CreateSlhDsaWallet = ({ onCreated }: CreateSlhDsaWalletProps) => {
             onChangeInputWord={() => {}}
           />
         </div>
-        <button type="button" data-testid="phrase-continue" onClick={startVerifying}>
-          {t('slh-dsa.create.phrase-continue')}
-        </button>
+        <div className={styles.actions}>
+          <Button
+            type="submit"
+            data-testid="phrase-continue"
+            label={t('slh-dsa.create.phrase-continue')}
+            onClick={startVerifying}
+          />
+        </div>
       </div>
     )
   }
 
   if (step === 'verify') {
     return (
-      <div>
-        <h2>{t('slh-dsa.create.verify-title')}</h2>
+      <div className={styles.container}>
+        <h2 className={styles.title}>{t('slh-dsa.create.verify-title')}</h2>
+        <p className={styles.hint}>{t('slh-dsa.create.verify-hint')}</p>
         <div data-testid="verify-phrase">
           <MnemonicInput
             words={mnemonic}
@@ -148,55 +193,103 @@ const CreateSlhDsaWallet = ({ onCreated }: CreateSlhDsaWalletProps) => {
             onChangeInputWord={onChangeInput}
           />
         </div>
-        <button type="button" data-testid="verify-continue" disabled={!verified} onClick={finish}>
-          {t('slh-dsa.create.verify-continue')}
-        </button>
+        <div className={styles.actions}>
+          <Button
+            type="submit"
+            data-testid="verify-continue"
+            label={t('slh-dsa.create.verify-continue')}
+            disabled={!verified}
+            onClick={finish}
+          />
+        </div>
       </div>
     )
   }
 
   return (
-    <div>
-      <h2>{t('slh-dsa.create.title')}</h2>
+    <form className={styles.container} onSubmit={submit}>
+      <h2 className={styles.title}>{t('slh-dsa.create.title')}</h2>
 
-      <label htmlFor="pq-name">{t('slh-dsa.create.name')}</label>
-      <input id="pq-name" data-testid="name" value={name} onChange={e => setName(e.target.value)} />
-
-      <label htmlFor="pq-password">{t('slh-dsa.create.password')}</label>
-      <input
-        id="pq-password"
+      <TextField
+        className={styles.field}
+        field="pq-name"
+        data-testid="name"
+        label={t('slh-dsa.create.name')}
+        value={name}
+        maxLength={MAX_WALLET_NAME_LENGTH}
+        onChange={(e: FieldChangeEvent) => setName(e.target.value)}
+        required
+      />
+      <TextField
+        className={styles.field}
+        field="pq-password"
         data-testid="password"
         type="password"
+        label={t('slh-dsa.create.password')}
         value={password}
-        onChange={e => setPassword(e.target.value)}
+        maxLength={MAX_PASSWORD_LENGTH}
+        onChange={(e: FieldChangeEvent) => setPassword(e.target.value)}
+        required
       />
-
-      <label htmlFor="pq-confirm">{t('slh-dsa.create.confirm')}</label>
-      <input
-        id="pq-confirm"
+      <TextField
+        className={styles.field}
+        field="pq-confirm"
         data-testid="confirm"
         type="password"
+        label={t('slh-dsa.create.confirm')}
         value={confirm}
-        onChange={e => setConfirm(e.target.value)}
+        maxLength={MAX_PASSWORD_LENGTH}
+        onChange={(e: FieldChangeEvent) => setConfirm(e.target.value)}
+        required
       />
 
-      <p data-testid="parameter-set">{selected}</p>
-      {current ? <p data-testid="witness-cost">{formatWitnessCost(current.witnessSize)}</p> : null}
+      <ul className={styles.notices}>
+        <Alert status={getAlertStatus(!!password, passwordIsComplex)}>{t('wizard.complex-password')}</Alert>
+        <Alert status={getAlertStatus(!!confirm, passwordsMatch)}>{t('wizard.same-password')}</Alert>
+      </ul>
 
-      <p data-testid="signing-time-note">{t('slh-dsa.create.signing-takes-seconds')}</p>
-      {description?.warnSlow ? (
-        <p data-testid="slow-signing-warning">{t('slh-dsa.create.slow-signing-warning')}</p>
-      ) : null}
+      <div className={styles.parameterSet}>
+        <span className={styles.name} data-testid="parameter-set">
+          {selected}
+        </span>
+        {current ? (
+          <span className={styles.cost} data-testid="witness-cost">
+            {formatWitnessCost(current.witnessSize)}
+          </span>
+        ) : null}
+      </div>
 
-      <button type="button" data-testid="toggle-advanced" onClick={() => setShowAdvanced(v => !v)}>
-        {t('slh-dsa.create.advanced')}
-      </button>
+      <ul className={styles.notices}>
+        <Alert status="init" data-testid="signing-time-note">
+          {t('slh-dsa.create.signing-takes-seconds')}
+        </Alert>
+        {description?.warnSlow ? (
+          <Alert status="warn" data-testid="slow-signing-warning">
+            {t('slh-dsa.create.slow-signing-warning')}
+          </Alert>
+        ) : null}
+      </ul>
+
+      <div className={styles.actions}>
+        <Button
+          type="text"
+          data-testid="toggle-advanced"
+          label={t('slh-dsa.create.advanced')}
+          onClick={() => setShowAdvanced(v => !v)}
+        />
+      </div>
 
       {showAdvanced && grouped ? (
-        <ul data-testid="advanced-parameter-sets">
+        <ul className={styles.advanced} data-testid="advanced-parameter-sets">
           {[grouped.recommended, ...grouped.advanced].map(set => (
             <li key={set.name}>
-              <button type="button" data-testid={`select-${set.name}`} onClick={() => setSelected(set.name)}>
+              <button
+                type="button"
+                className={styles.setOption}
+                aria-pressed={set.name === selected}
+                data-testid={`select-${set.name}`}
+                onClick={() => setSelected(set.name)}
+              >
                 {set.name} — {formatWitnessCost(set.witnessSize)}
                 {set.slowSigning ? ` — ${t('slh-dsa.create.slow')}` : ''}
               </button>
@@ -205,12 +298,24 @@ const CreateSlhDsaWallet = ({ onCreated }: CreateSlhDsaWalletProps) => {
         </ul>
       ) : null}
 
-      {error ? <p data-testid="create-error">{error}</p> : null}
+      {error ? (
+        <Alert status="error" data-testid="create-error">
+          {error}
+        </Alert>
+      ) : null}
 
-      <button type="button" data-testid="submit" disabled={!canSubmit} onClick={submit}>
-        {t('slh-dsa.create.submit')}
-      </button>
-    </div>
+      <div className={styles.actions}>
+        <Button
+          type="submit"
+          data-testid="submit"
+          label={t('slh-dsa.create.submit')}
+          disabled={!canSubmit}
+          loading={busy}
+          onClick={submit}
+        />
+        {onBack ? <Button type="text" data-testid="back" label={t('common.back')} onClick={onBack} /> : null}
+      </div>
+    </form>
   )
 }
 

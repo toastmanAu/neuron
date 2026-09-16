@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import Alert from 'widgets/Alert'
+import Button from 'widgets/Button'
 import CopyZone from 'widgets/CopyZone'
 import QRCode from 'widgets/QRCode'
 import { getSlhDsaAddresses } from 'services/remote'
 import type { ControllerResponse, SuccessFromController } from 'services/remote/remoteApiWrapper'
+import styles from './slhDsaReceive.module.scss'
 
 // A type predicate, so the response union actually narrows. Without `res is ...` the
 // compiler keeps both arms and `result` does not exist on the failure one.
@@ -36,20 +39,24 @@ const SlhDsaReceive = ({ walletId, onClose }: SlhDsaReceiveProps) => {
         return
       }
       const { message } = res as { message?: string | { content?: string } }
-      setError(typeof message === 'string' ? message : message?.content ?? 'Could not load the address')
+      setError(typeof message === 'string' ? message : message?.content ?? t('slh-dsa.receive.failed'))
     })
-  }, [walletId])
+  }, [walletId, t])
 
   const close = onClose ? (
-    <button type="button" data-testid="close" onClick={onClose}>
-      {t('common.close')}
-    </button>
+    <div className={styles.actions}>
+      <Button type="cancel" data-testid="close" label={t('common.close')} onClick={onClose} />
+    </div>
   ) : null
 
   if (error) {
     return (
-      <div>
-        <p data-testid="receive-error">{error}</p>
+      <div className={styles.container}>
+        <ul className={styles.notices}>
+          <Alert status="error" data-testid="receive-error">
+            {error}
+          </Alert>
+        </ul>
         {close}
       </div>
     )
@@ -60,17 +67,35 @@ const SlhDsaReceive = ({ walletId, onClose }: SlhDsaReceiveProps) => {
   }
 
   return (
-    <div>
-      <h2>{t('slh-dsa.receive.title')}</h2>
-      <QRCode value={address.address} size={128} includeMargin />
+    <div className={styles.container}>
+      <h2 className={styles.title}>{t('slh-dsa.receive.title')}</h2>
+
+      <div className={styles.qrCode}>
+        <QRCode value={address.address} size={128} includeMargin />
+      </div>
+
       <CopyZone content={address.address}>
-        <span data-testid="address">{address.address}</span>
+        <span className={styles.address} data-testid="address">
+          {address.address}
+        </span>
       </CopyZone>
-      <p data-testid="parameter-set">
-        {t('slh-dsa.receive.parameter-set')}: {address.parameterSet}
-      </p>
-      <p data-testid="network-note">{t('slh-dsa.receive.network-note')}</p>
-      {address.watchOnly ? <p data-testid="watch-only">{t('slh-dsa.receive.watch-only')}</p> : null}
+
+      <dl className={styles.meta} data-testid="parameter-set">
+        <dt>{t('slh-dsa.receive.parameter-set')}</dt>
+        <dd>{address.parameterSet}</dd>
+      </dl>
+
+      <ul className={styles.notices}>
+        <Alert status="init" data-testid="network-note">
+          {t('slh-dsa.receive.network-note')}
+        </Alert>
+        {address.watchOnly ? (
+          <Alert status="warn" data-testid="watch-only">
+            {t('slh-dsa.receive.watch-only')}
+          </Alert>
+        ) : null}
+      </ul>
+
       {close}
     </div>
   )

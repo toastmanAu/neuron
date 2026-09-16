@@ -37,8 +37,8 @@ const MNEMONIC = [
 
 const fillForm = () => {
   fireEvent.change(screen.getByTestId('name'), { target: { value: 'pq' } })
-  fireEvent.change(screen.getByTestId('password'), { target: { value: 'a-good-password' } })
-  fireEvent.change(screen.getByTestId('confirm'), { target: { value: 'a-good-password' } })
+  fireEvent.change(screen.getByTestId('password'), { target: { value: 'A-good-password1' } })
+  fireEvent.change(screen.getByTestId('confirm'), { target: { value: 'A-good-password1' } })
   fireEvent.click(screen.getByTestId('submit'))
 }
 
@@ -93,12 +93,25 @@ describe('CreateSlhDsaWallet', () => {
     expect(screen.getByTestId('submit')).toBeDisabled()
   })
 
+  it('holds a quantum-resistant wallet to the same password rules as any other', async () => {
+    // It would be absurd for the wallet chosen for its resistance to a future attacker to accept a
+    // weaker password than a secp one.
+    render(<CreateSlhDsaWallet onCreated={vi.fn()} />)
+    await waitFor(() => screen.getByTestId('parameter-set'))
+
+    fireEvent.change(screen.getByTestId('name'), { target: { value: 'pq' } })
+    fireEvent.change(screen.getByTestId('password'), { target: { value: 'password' } })
+    fireEvent.change(screen.getByTestId('confirm'), { target: { value: 'password' } })
+
+    expect(screen.getByTestId('submit')).toBeDisabled()
+  })
+
   it('will not submit when the confirmation does not match', async () => {
     render(<CreateSlhDsaWallet onCreated={vi.fn()} />)
     await waitFor(() => screen.getByTestId('parameter-set'))
 
     fireEvent.change(screen.getByTestId('name'), { target: { value: 'pq' } })
-    fireEvent.change(screen.getByTestId('password'), { target: { value: 'a-good-password' } })
+    fireEvent.change(screen.getByTestId('password'), { target: { value: 'A-good-password1' } })
     fireEvent.change(screen.getByTestId('confirm'), { target: { value: 'different' } })
 
     expect(screen.getByTestId('submit')).toBeDisabled()
@@ -114,7 +127,7 @@ describe('CreateSlhDsaWallet', () => {
     await waitFor(() =>
       expect(createSlhDsaWallet).toHaveBeenCalledWith({
         name: 'pq',
-        password: 'a-good-password',
+        password: 'A-good-password1',
         parameterSet: 'SLH-DSA-SHA2-256s',
       })
     )
@@ -126,14 +139,14 @@ describe('CreateSlhDsaWallet', () => {
     render(<CreateSlhDsaWallet onCreated={vi.fn()} />)
     await waitFor(() => screen.getByTestId('parameter-set'))
 
-    fireEvent.change(screen.getByTestId('password'), { target: { value: 'a-good-password' } })
-    fireEvent.change(screen.getByTestId('confirm'), { target: { value: 'a-good-password' } })
+    fireEvent.change(screen.getByTestId('password'), { target: { value: 'A-good-password1' } })
+    fireEvent.change(screen.getByTestId('confirm'), { target: { value: 'A-good-password1' } })
 
     expect(screen.getByTestId('password')).toHaveAttribute('type', 'password')
     expect(screen.getByTestId('confirm')).toHaveAttribute('type', 'password')
 
     const elsewhere = document.body.innerHTML.replace(/<input[^>]*type="password"[^>]*>/g, '')
-    expect(elsewhere).not.toContain('a-good-password')
+    expect(elsewhere).not.toContain('A-good-password1')
   })
 
   it('warns that signing takes seconds, because the app will appear to hang', async () => {
