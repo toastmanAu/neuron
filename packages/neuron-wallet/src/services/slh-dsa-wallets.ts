@@ -1,10 +1,16 @@
-import crypto from 'crypto'
 import { hd } from '@ckb-lumos/lumos'
 import { bytes } from '@ckb-lumos/lumos/codec'
 import FileService from './file'
 import ScriptIdentityService from './script-identities'
 import ScriptIdentity from '../models/script-identity'
 import SlhDsaKeystore, { IncorrectVaultPassword, SlhDsaKeystoreJson } from '../models/keys/slh-dsa-keystore'
+import {
+  deriveChildKeyPair,
+  generateMasterSeed,
+  masterSeedToMnemonic,
+  mnemonicToMasterSeed,
+  wordCount,
+} from '../models/keys/slh-dsa-mnemonic'
 import SlhDsaLockProvider, { SlhDsaSecret } from './lock-providers/slh-dsa/provider'
 import { getParameterSet, SlhDsaParameterSetName } from './lock-providers/slh-dsa/parameter-sets'
 import { Network } from '../models/network'
@@ -32,6 +38,26 @@ export interface CreateSlhDsaWalletParams {
   walletId: string
   parameterSet: SlhDsaParameterSetName
   password: string
+}
+
+export interface ImportMnemonicParams extends CreateSlhDsaWalletParams {
+  mnemonic: string
+}
+
+export interface CreatedSlhDsaWallet {
+  publicKey: string
+  parameterSet: SlhDsaParameterSetName
+  /** The three BIP39 phrases behind this wallet. Shown once, at creation, and never stored. */
+  mnemonic: string
+}
+
+/** The account a newly created wallet uses. Further accounts are derivable but not yet exposed. */
+const FIRST_ACCOUNT_INDEX = 0
+
+export class VaultHasNoMnemonic extends Error {
+  constructor(walletId: string) {
+    super(`Wallet ${walletId} was created before recovery phrases and has none`)
+  }
 }
 
 export interface WatchOnlyParams {
@@ -71,40 +97,90 @@ export default class SlhDsaWalletService {
   }
 
   /**
-   * Generate a key pair and store it encrypted.
+   * Generate a wallet and store its master seed encrypted.
    *
-   * The seed comes from the platform CSPRNG and is wiped after key generation. The returned public
-   * key is not secret and is what the caller needs in order to show an address.
+   * The seed comes from the platform CSPRNG. The returned mnemonic is the only copy the user will
+   * ever be offered without their password, and it is not stored anywhere in the clear.
    */
   public static async create(
     { walletId, parameterSet, password }: CreateSlhDsaWalletParams,
     options: { kdfparams?: { n: number; r: number; p: number } } = {}
-  ): Promise<{ publicKey: string; parameterSet: SlhDsaParameterSetName }> {
+  ): Promise<CreatedSlhDsaWallet> {
+    const masterSeed = generateMasterSeed(parameterSet)
+    try {
+      return SlhDsaWalletService.storeMasterSeed({ walletId, parameterSet, password }, masterSeed, options)
+    } finally {
+      masterSeed.fill(0)
+    }
+  }
+
+  /**
+   * Restore a wallet from its three BIP39 phrases.
+   *
+   * The parameter set is taken from the caller rather than guessed from the word count, because a
+   * phrase of a given length is valid for several sets and picking the wrong one silently yields a
+   * different wallet. The word count is then checked against it.
+   */
+  public static async importMnemonic(
+    { walletId, parameterSet, password, mnemonic }: ImportMnemonicParams,
+    options: { kdfparams?: { n: number; r: number; p: number } } = {}
+  ): Promise<CreatedSlhDsaWallet> {
+    const words = mnemonic.trim().split(/\s+/).filter(Boolean)
+    const expected = wordCount(parameterSet)
+    if (words.length !== expected) {
+      throw new Error(`${parameterSet} needs a ${expected} word recovery phrase, got ${words.length} words`)
+    }
+
+    const masterSeed = mnemonicToMasterSeed(mnemonic)
+    try {
+      return SlhDsaWalletService.storeMasterSeed({ walletId, parameterSet, password }, masterSeed, options)
+    } finally {
+      masterSeed.fill(0)
+    }
+  }
+
+  /**
+   * Show the user their recovery phrase again.
+   *
+   * Behind the password, because the phrase is the wallet: anyone holding it can spend.
+   */
+  public static async exportMnemonic(walletId: string, password: string): Promise<string> {
+    const keystore = SlhDsaWalletService.loadVault(walletId)
+    if (keystore.payload !== 'master-seed') {
+      throw new VaultHasNoMnemonic(walletId)
+    }
+
+    const masterSeed = bytes.bytify(keystore.decrypt(password))
+    try {
+      return masterSeedToMnemonic(masterSeed)
+    } finally {
+      masterSeed.fill(0)
+    }
+  }
+
+  private static storeMasterSeed(
+    { walletId, parameterSet, password }: CreateSlhDsaWalletParams,
+    masterSeed: Uint8Array,
+    options: { kdfparams?: { n: number; r: number; p: number } }
+  ): CreatedSlhDsaWallet {
     if (SlhDsaWalletService.hasVault(walletId)) {
       throw new VaultAlreadyExists(walletId)
     }
 
-    const set = getParameterSet(parameterSet)
-    // FIPS 205 key generation consumes three n-byte seeds: SK.seed, SK.prf and PK.seed.
-    const seed = crypto.randomBytes(set.publicKeyLength + set.publicKeyLength / 2)
-    try {
-      const { secretKey, publicKey } = set.signer.keygen(seed)
-      const keystore = SlhDsaKeystore.create(
-        {
-          secretKey: bytes.hexify(secretKey),
-          publicKey: bytes.hexify(publicKey),
-          parameterSet,
-        },
-        password,
-        options
-      )
-      secretKey.fill(0)
+    const { publicKey } = deriveChildKeyPair(masterSeed, parameterSet, FIRST_ACCOUNT_INDEX)
+    const keystore = SlhDsaKeystore.create(
+      {
+        masterSeed: bytes.hexify(masterSeed),
+        publicKey,
+        parameterSet,
+        accountIndex: FIRST_ACCOUNT_INDEX,
+      },
+      password,
+      options
+    )
 
-      SlhDsaWalletService.writeVault(walletId, keystore)
-      return { publicKey: bytes.hexify(publicKey), parameterSet }
-    } finally {
-      seed.fill(0)
-    }
+    SlhDsaWalletService.writeVault(walletId, keystore)
+    return { publicKey, parameterSet, mnemonic: masterSeedToMnemonic(masterSeed) }
   }
 
   public static loadVault(walletId: string): SlhDsaKeystore {
@@ -139,10 +215,36 @@ export default class SlhDsaWalletService {
     SlhDsaWalletService.writeVault(walletId, keystore)
   }
 
+  /**
+   * Recover the signing key.
+   *
+   * A version 2 vault holds the master seed, so the key is derived here rather than stored; a
+   * version 1 vault holds the expanded key itself and is returned as-is. The derived public key is
+   * checked against the one the vault records, which catches a corrupted seed or a wrong account
+   * index here instead of as a rejected transaction.
+   */
   public static async getSecret(walletId: string, password: string): Promise<SlhDsaSecret> {
     const keystore = SlhDsaWalletService.loadVault(walletId)
-    const secretKey = keystore.decrypt(password)
-    return { type: 'slh-dsa-secret-key', secretKey, parameterSet: keystore.parameterSet }
+    const plaintext = keystore.decrypt(password)
+
+    if (keystore.payload === 'secret-key') {
+      return { type: 'slh-dsa-secret-key', secretKey: plaintext, parameterSet: keystore.parameterSet }
+    }
+
+    const masterSeed = bytes.bytify(plaintext)
+    try {
+      const { publicKey, secretKey } = deriveChildKeyPair(
+        masterSeed,
+        keystore.parameterSet,
+        keystore.accountIndex ?? FIRST_ACCOUNT_INDEX
+      )
+      if (publicKey !== keystore.publicKey) {
+        throw new Error(`The key derived for wallet ${walletId} does not match the public key its vault records`)
+      }
+      return { type: 'slh-dsa-secret-key', secretKey, parameterSet: keystore.parameterSet }
+    } finally {
+      masterSeed.fill(0)
+    }
   }
 
   /**

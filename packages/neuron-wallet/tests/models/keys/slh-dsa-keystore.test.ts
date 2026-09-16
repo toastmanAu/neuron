@@ -5,19 +5,34 @@ import SlhDsaKeystore from '../../../src/models/keys/slh-dsa-keystore'
 // stored format, so a cheaper setting here is ordinary use of the API rather than a test hook.
 const FAST_KDF = { n: 1024, r: 8, p: 1 }
 
-const SECRET = `0x${'ab'.repeat(64)}`
+// 3n bytes for n = 16: SK.seed, SK.prf and PK.seed.
+const MASTER_SEED = `0x${'ab'.repeat(48)}`
 const PUBLIC_KEY = `0x${'cd'.repeat(32)}`
 const PASSWORD = 'correct horse battery staple'
 
-const create = (secret = SECRET) =>
-  SlhDsaKeystore.create({ secretKey: secret, publicKey: PUBLIC_KEY, parameterSet: 'SLH-DSA-SHA2-128s' }, PASSWORD, {
-    kdfparams: FAST_KDF,
-  })
+const create = (secret = MASTER_SEED, accountIndex = 0) =>
+  SlhDsaKeystore.create(
+    { masterSeed: secret, publicKey: PUBLIC_KEY, parameterSet: 'SLH-DSA-SHA2-128s', accountIndex },
+    PASSWORD,
+    { kdfparams: FAST_KDF }
+  )
 
 describe('SlhDsaKeystore', () => {
   describe('round trip', () => {
-    it('returns the secret it was given', () => {
-      expect(create().decrypt(PASSWORD)).toBe(SECRET)
+    it('returns the master seed it was given', () => {
+      expect(create().decrypt(PASSWORD)).toBe(MASTER_SEED)
+    })
+
+    it('stores the master seed rather than an expanded key, and says so', () => {
+      const keystore = create()
+
+      expect(keystore.payload).toBe('master-seed')
+      expect(keystore.version).toBe(2)
+    })
+
+    it('keeps the account index, which the seed alone does not imply', () => {
+      expect(create(MASTER_SEED, 3).accountIndex).toBe(3)
+      expect(SlhDsaKeystore.fromJson(JSON.stringify(create(MASTER_SEED, 3).toJson())).accountIndex).toBe(3)
     })
 
     it('keeps the public key and parameter set in the clear for recovery', () => {
@@ -32,7 +47,7 @@ describe('SlhDsaKeystore', () => {
     it('survives serialisation to JSON and back', () => {
       const restored = SlhDsaKeystore.fromJson(JSON.stringify(create().toJson()))
 
-      expect(restored.decrypt(PASSWORD)).toBe(SECRET)
+      expect(restored.decrypt(PASSWORD)).toBe(MASTER_SEED)
       expect(restored.publicKey).toBe(PUBLIC_KEY)
     })
   })
@@ -64,9 +79,11 @@ describe('SlhDsaKeystore', () => {
 
     it('rejects an empty password', () => {
       expect(() =>
-        SlhDsaKeystore.create({ secretKey: SECRET, publicKey: PUBLIC_KEY, parameterSet: 'SLH-DSA-SHA2-128s' }, '', {
-          kdfparams: FAST_KDF,
-        })
+        SlhDsaKeystore.create(
+          { masterSeed: MASTER_SEED, publicKey: PUBLIC_KEY, parameterSet: 'SLH-DSA-SHA2-128s', accountIndex: 0 },
+          '',
+          { kdfparams: FAST_KDF }
+        )
       ).toThrow(/password/i)
     })
   })
@@ -125,7 +142,7 @@ describe('SlhDsaKeystore', () => {
 
     it('defaults to the same scrypt cost Neuron already uses for secp keystores', () => {
       const keystore = SlhDsaKeystore.create(
-        { secretKey: SECRET, publicKey: PUBLIC_KEY, parameterSet: 'SLH-DSA-SHA2-128s' },
+        { masterSeed: MASTER_SEED, publicKey: PUBLIC_KEY, parameterSet: 'SLH-DSA-SHA2-128s', accountIndex: 0 },
         PASSWORD
       )
 
@@ -135,13 +152,24 @@ describe('SlhDsaKeystore', () => {
 
   describe('validation', () => {
     it('rejects a secret that is not hex', () => {
-      expect(() => create('not hex')).toThrow(/secret/i)
+      expect(() => create('not hex')).toThrow(/master seed/i)
+    })
+
+    it('rejects a master seed of the wrong length for its parameter set', () => {
+      // 48 bytes for n = 16; anything else means the caller and the parameter set disagree about
+      // which key this vault holds, and that only surfaces later as a wrong address.
+      expect(() => create(`0x${'ab'.repeat(32)}`)).toThrow(/master seed/i)
+    })
+
+    it('rejects a negative or non-integer account index', () => {
+      expect(() => create(MASTER_SEED, -1)).toThrow(/account index/i)
+      expect(() => create(MASTER_SEED, 1.5)).toThrow(/account index/i)
     })
 
     it('rejects an unknown parameter set', () => {
       expect(() =>
         SlhDsaKeystore.create(
-          { secretKey: SECRET, publicKey: PUBLIC_KEY, parameterSet: 'SLH-DSA-NOPE' as never },
+          { masterSeed: MASTER_SEED, publicKey: PUBLIC_KEY, parameterSet: 'SLH-DSA-NOPE' as never, accountIndex: 0 },
           PASSWORD,
           { kdfparams: FAST_KDF }
         )
@@ -151,7 +179,12 @@ describe('SlhDsaKeystore', () => {
     it('rejects a public key of the wrong length for its parameter set', () => {
       expect(() =>
         SlhDsaKeystore.create(
-          { secretKey: SECRET, publicKey: `0x${'cd'.repeat(8)}`, parameterSet: 'SLH-DSA-SHA2-128s' },
+          {
+            masterSeed: MASTER_SEED,
+            publicKey: `0x${'cd'.repeat(8)}`,
+            parameterSet: 'SLH-DSA-SHA2-128s',
+            accountIndex: 0,
+          },
           PASSWORD,
           { kdfparams: FAST_KDF }
         )
@@ -169,15 +202,57 @@ describe('SlhDsaKeystore', () => {
     it('does not keep the plaintext secret on the instance', () => {
       const keystore = create()
 
-      expect(JSON.stringify(keystore)).not.toContain(SECRET.slice(2))
+      expect(JSON.stringify(keystore)).not.toContain(MASTER_SEED.slice(2))
     })
 
     it('does not put the secret in a thrown error message', () => {
       try {
         create().decrypt('wrong password')
       } catch (error) {
-        expect((error as Error).message).not.toContain(SECRET.slice(2))
+        expect((error as Error).message).not.toContain(MASTER_SEED.slice(2))
       }
+    })
+  })
+
+  describe('version 1 vaults', () => {
+    // Version 1 stored the expanded SLH-DSA secret key and had no mnemonic behind it. Wallets in
+    // that format exist on disk with funds in them, so reading one has to keep working forever
+    // even though nothing writes one any more. Built from a literal below rather than from this
+    // module, so removing the legacy path cannot quietly keep the test green.
+    const LEGACY_V1 = {
+      version: 1,
+      parameterSet: 'SLH-DSA-SHA2-128s',
+      publicKey: PUBLIC_KEY,
+      crypto: {
+        cipher: 'aes-256-gcm',
+        ciphertext: '9b9c24fdca7bd3b8de8f3f07f3ee85a4b5b5ce37e0e5aa6c6b35c0e6d1b0a9c3',
+        cipherparams: { iv: '000102030405060708090a0b' },
+        authTag: '00112233445566778899aabbccddeeff',
+        kdf: 'scrypt',
+        kdfparams: { n: 1024, r: 8, p: 1, dklen: 32, salt: 'ff'.repeat(32) },
+      },
+    }
+
+    it('still parses', () => {
+      const keystore = SlhDsaKeystore.fromJson(JSON.stringify(LEGACY_V1))
+
+      expect(keystore.version).toBe(1)
+      expect(keystore.publicKey).toBe(PUBLIC_KEY)
+      expect(keystore.parameterSet).toBe('SLH-DSA-SHA2-128s')
+    })
+
+    it('reports that it holds an expanded key, not a master seed', () => {
+      // The caller has to know which one came back out of `decrypt`, and a v1 vault cannot produce
+      // a mnemonic or further accounts.
+      expect(SlhDsaKeystore.fromJson(JSON.stringify(LEGACY_V1)).payload).toBe('secret-key')
+    })
+
+    it('has no account index', () => {
+      expect(SlhDsaKeystore.fromJson(JSON.stringify(LEGACY_V1)).accountIndex).toBeUndefined()
+    })
+
+    it('round trips back to version 1, so reading one does not rewrite it', () => {
+      expect(SlhDsaKeystore.fromJson(JSON.stringify(LEGACY_V1)).toJson()).toEqual(LEGACY_V1)
     })
   })
 })

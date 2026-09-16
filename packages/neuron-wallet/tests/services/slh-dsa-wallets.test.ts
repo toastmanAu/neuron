@@ -135,6 +135,139 @@ describe('SlhDsaWalletService', () => {
         SlhDsaWalletService.create({ walletId: WALLET, parameterSet: PARAM, password: PASSWORD }, FAST)
       ).rejects.toThrow(/already/i)
     })
+
+    it('returns a 36 word recovery phrase the user can write down', async () => {
+      const { mnemonic } = await SlhDsaWalletService.create(
+        { walletId: WALLET, parameterSet: PARAM, password: PASSWORD },
+        FAST
+      )
+
+      expect(mnemonic.split(' ')).toHaveLength(36)
+    })
+
+    it('sizes the phrase to the parameter set', async () => {
+      // A 256-bit set needs three 24 word phrases, not three 12 word ones. Getting this wrong
+      // produces a phrase that restores a different, shorter seed.
+      const { mnemonic } = await SlhDsaWalletService.create(
+        { walletId: 'big', parameterSet: 'SLH-DSA-SHA2-256s', password: PASSWORD },
+        FAST
+      )
+
+      expect(mnemonic.split(' ')).toHaveLength(72)
+    })
+
+    it('stores the master seed, not the expanded key', async () => {
+      await SlhDsaWalletService.create({ walletId: WALLET, parameterSet: PARAM, password: PASSWORD }, FAST)
+
+      const vault = SlhDsaWalletService.loadVault(WALLET)
+
+      expect(vault.payload).toBe('master-seed')
+      expect(vault.accountIndex).toBe(0)
+    })
+  })
+
+  describe('recovery phrases', () => {
+    it('restores the same wallet from the phrase it handed out', async () => {
+      const created = await SlhDsaWalletService.create(
+        { walletId: WALLET, parameterSet: PARAM, password: PASSWORD },
+        FAST
+      )
+
+      await SlhDsaWalletService.importMnemonic(
+        { walletId: 'restored', parameterSet: PARAM, password: 'a different password', mnemonic: created.mnemonic },
+        FAST
+      )
+
+      const restored = SlhDsaWalletService.loadVault('restored')
+      expect(restored.publicKey).toBe(created.publicKey)
+    })
+
+    it('restores a spendable key, not just a matching address', async () => {
+      const created = await SlhDsaWalletService.create(
+        { walletId: WALLET, parameterSet: PARAM, password: PASSWORD },
+        FAST
+      )
+      await SlhDsaWalletService.importMnemonic(
+        { walletId: 'restored', parameterSet: PARAM, password: PASSWORD, mnemonic: created.mnemonic },
+        FAST
+      )
+
+      const original = await SlhDsaWalletService.getSecret(WALLET, PASSWORD)
+      const restored = await SlhDsaWalletService.getSecret('restored', PASSWORD)
+
+      expect(restored.secretKey).toBe(original.secretKey)
+    })
+
+    it('exports the same phrase it was created with', async () => {
+      const { mnemonic } = await SlhDsaWalletService.create(
+        { walletId: WALLET, parameterSet: PARAM, password: PASSWORD },
+        FAST
+      )
+
+      await expect(SlhDsaWalletService.exportMnemonic(WALLET, PASSWORD)).resolves.toBe(mnemonic)
+    })
+
+    it('will not export the phrase without the password', async () => {
+      await SlhDsaWalletService.create({ walletId: WALLET, parameterSet: PARAM, password: PASSWORD }, FAST)
+
+      await expect(SlhDsaWalletService.exportMnemonic(WALLET, 'wrong password')).rejects.toThrow(/password/i)
+    })
+
+    it('rejects a phrase whose length does not match the chosen parameter set', async () => {
+      const { mnemonic } = await SlhDsaWalletService.create(
+        { walletId: WALLET, parameterSet: PARAM, password: PASSWORD },
+        FAST
+      )
+
+      await expect(
+        SlhDsaWalletService.importMnemonic(
+          { walletId: 'mismatch', parameterSet: 'SLH-DSA-SHA2-256s', password: PASSWORD, mnemonic },
+          FAST
+        )
+      ).rejects.toThrow(/SLH-DSA-SHA2-256s/)
+      expect(SlhDsaWalletService.hasVault('mismatch')).toBe(false)
+    })
+
+    it('rejects a phrase with a miscopied word, naming which of the three to re-read', async () => {
+      const { mnemonic } = await SlhDsaWalletService.create(
+        { walletId: WALLET, parameterSet: PARAM, password: PASSWORD },
+        FAST
+      )
+      const words = mnemonic.split(' ')
+      words[13] = 'zoo'
+
+      await expect(
+        SlhDsaWalletService.importMnemonic(
+          { walletId: 'typo', parameterSet: PARAM, password: PASSWORD, mnemonic: words.join(' ') },
+          FAST
+        )
+      ).rejects.toThrow(/phrase 2/)
+    })
+
+    it('refuses to overwrite an existing vault', async () => {
+      const { mnemonic } = await SlhDsaWalletService.create(
+        { walletId: WALLET, parameterSet: PARAM, password: PASSWORD },
+        FAST
+      )
+
+      await expect(
+        SlhDsaWalletService.importMnemonic(
+          { walletId: WALLET, parameterSet: PARAM, password: PASSWORD, mnemonic },
+          FAST
+        )
+      ).rejects.toThrow(/already/i)
+    })
+
+    it('cannot export a phrase for a version 1 vault, which never had one', async () => {
+      // Vaults created before mnemonics exist on disk with funds in them. They still sign; they
+      // just have no words behind them, and saying so plainly beats returning a phrase that
+      // restores nothing.
+      await SlhDsaWalletService.create({ walletId: WALLET, parameterSet: PARAM, password: PASSWORD }, FAST)
+      const v2 = JSON.parse(files.get(`pq-vaults/${WALLET}.json`)!)
+      files.set(`pq-vaults/${WALLET}.json`, JSON.stringify({ ...v2, version: 1, accountIndex: undefined }))
+
+      await expect(SlhDsaWalletService.exportMnemonic(WALLET, PASSWORD)).rejects.toThrow(/recovery phrase/i)
+    })
   })
 
   describe('deriving identities', () => {

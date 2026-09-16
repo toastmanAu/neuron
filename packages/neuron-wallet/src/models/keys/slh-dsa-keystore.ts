@@ -3,7 +3,7 @@ import { bytes } from '@ckb-lumos/lumos/codec'
 import { getParameterSet, SlhDsaParameterSetName } from '../../services/lock-providers/slh-dsa/parameter-sets'
 
 /**
- * Encrypted storage for an SLH-DSA private key.
+ * Encrypted storage for an SLH-DSA wallet's master seed.
  *
  * Deliberately not Lumos' `hd.Keystore`, which Neuron uses for secp master keys. That envelope
  * derives 32 bytes with scrypt and then encrypts under only the first 16 of them with aes-128-ctr,
@@ -25,7 +25,21 @@ export const DEFAULT_KDF_PARAMS = { n: 262144, r: 8, p: 1, dklen: 32 } as const
 const CIPHER = 'aes-256-gcm'
 const SALT_SIZE = 32
 const IV_SIZE = 12
-const VERSION = 1
+
+/**
+ * Vault format versions.
+ *
+ * 1 encrypted the expanded SLH-DSA secret key and had no mnemonic behind it. 2 encrypts the master
+ * seed and records which account was derived from it, so the wallet can be written down as words
+ * and further accounts can be derived later. Nothing writes version 1 any more, but wallets in
+ * that format exist on disk with funds in them, so reading one keeps working: the version here is
+ * a read-compatibility contract, not a changelog.
+ */
+const VERSION = 2
+const LEGACY_SECRET_KEY_VERSION = 1
+
+/** What `decrypt` hands back. A version 1 vault cannot produce a mnemonic or further accounts. */
+export type SlhDsaVaultPayload = 'secret-key' | 'master-seed'
 
 export interface SlhDsaKdfParams {
   n: number
@@ -48,13 +62,16 @@ export interface SlhDsaKeystoreJson {
   version: number
   parameterSet: SlhDsaParameterSetName
   publicKey: string
+  /** Version 2 only: which account of the master seed `publicKey` belongs to. */
+  accountIndex?: number
   crypto: SlhDsaKeystoreCrypto
 }
 
 export interface SlhDsaSecretToStore {
-  secretKey: string
+  masterSeed: string
   publicKey: string
   parameterSet: SlhDsaParameterSetName
+  accountIndex: number
 }
 
 export class IncorrectVaultPassword extends Error {
@@ -82,13 +99,19 @@ export default class SlhDsaKeystore {
   public readonly version: number
   public readonly parameterSet: SlhDsaParameterSetName
   public readonly publicKey: string
+  public readonly accountIndex?: number
   public readonly crypto: SlhDsaKeystoreCrypto
 
   private constructor(json: SlhDsaKeystoreJson) {
     this.version = json.version
     this.parameterSet = json.parameterSet
     this.publicKey = json.publicKey
+    this.accountIndex = json.accountIndex
     this.crypto = json.crypto
+  }
+
+  public get payload(): SlhDsaVaultPayload {
+    return this.version === LEGACY_SECRET_KEY_VERSION ? 'secret-key' : 'master-seed'
   }
 
   public static create(
@@ -99,11 +122,23 @@ export default class SlhDsaKeystore {
     if (!password) {
       throw new Error('A password is required to create a quantum-resistant key vault')
     }
-    if (!HEX.test(secret.secretKey)) {
-      throw new Error('The SLH-DSA secret key must be a 0x-prefixed hex string')
+    if (!HEX.test(secret.masterSeed)) {
+      throw new Error('The master seed must be a 0x-prefixed hex string')
+    }
+    if (!Number.isInteger(secret.accountIndex) || secret.accountIndex < 0) {
+      throw new Error(`Account index must be a non-negative integer, got ${secret.accountIndex}`)
     }
 
     const parameterSet = getParameterSet(secret.parameterSet)
+    const masterSeedBytes = bytes.bytify(secret.masterSeed)
+    // Three n-byte seeds. A mismatch here means the caller and the parameter set disagree about
+    // which key this vault holds, which otherwise only surfaces later as a wrong address.
+    if (masterSeedBytes.byteLength !== parameterSet.n * 3) {
+      throw new Error(
+        `${parameterSet.name} expects a ${parameterSet.n * 3} byte master seed, got ${masterSeedBytes.byteLength}`
+      )
+    }
+
     const publicKeyBytes = bytes.bytify(secret.publicKey)
     if (publicKeyBytes.byteLength !== parameterSet.publicKeyLength) {
       throw new Error(
@@ -123,7 +158,7 @@ export default class SlhDsaKeystore {
     let plaintext: Buffer | undefined
     try {
       derivedKey = deriveKey(password, kdfparams)
-      plaintext = Buffer.from(secret.secretKey.slice(2), 'hex')
+      plaintext = Buffer.from(secret.masterSeed.slice(2), 'hex')
 
       const cipher = crypto.createCipheriv(CIPHER, derivedKey, iv)
       const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()])
@@ -132,6 +167,7 @@ export default class SlhDsaKeystore {
         version: VERSION,
         parameterSet: parameterSet.name,
         publicKey: secret.publicKey,
+        accountIndex: secret.accountIndex,
         crypto: {
           cipher: CIPHER,
           ciphertext: ciphertext.toString('hex'),
@@ -149,27 +185,31 @@ export default class SlhDsaKeystore {
 
   public static fromJson(json: string): SlhDsaKeystore {
     const parsed = JSON.parse(json) as SlhDsaKeystoreJson
-    if (parsed.version !== VERSION) {
+    if (parsed.version !== VERSION && parsed.version !== LEGACY_SECRET_KEY_VERSION) {
       throw new Error(`Unsupported quantum-resistant key vault version ${parsed.version}`)
     }
     return new SlhDsaKeystore(parsed)
   }
 
   public toJson(): SlhDsaKeystoreJson {
+    // A version 1 vault has no account index, and must come back out exactly as it went in so that
+    // reading one does not rewrite it into a shape its own version does not describe.
     return {
       version: this.version,
       parameterSet: this.parameterSet,
       publicKey: this.publicKey,
+      ...(this.accountIndex === undefined ? {} : { accountIndex: this.accountIndex }),
       crypto: this.crypto,
     }
   }
 
   /**
-   * Recover the private key.
+   * Recover what this vault holds: the master seed for version 2, the expanded secret key for a
+   * version 1 vault. `payload` says which, and callers have to branch on it.
    *
    * Throws on a wrong password or a tampered vault; GCM authentication makes those the same failure
-   * and neither yields plaintext. Callers should use the returned key and drop it promptly — once it
-   * is a JavaScript string the runtime owns its lifetime and it cannot be wiped.
+   * and neither yields plaintext. Callers should use the result and drop it promptly — once it is a
+   * JavaScript string the runtime owns its lifetime and it cannot be wiped.
    */
   public decrypt(password: string): string {
     let derivedKey: Buffer | undefined
