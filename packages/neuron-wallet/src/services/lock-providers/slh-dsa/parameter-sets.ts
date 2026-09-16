@@ -60,6 +60,15 @@ export interface SlhDsaParameterSet {
   readonly paramId: number
   readonly argsPrefix: string
   readonly witnessPrefix: string
+  /**
+   * FIPS 205 `n`, the security parameter in bytes: 16, 24 or 32.
+   *
+   * Key generation consumes three n-byte seeds (SK.seed, SK.prf, PK.seed) and the public key is
+   * two of them wide, so this is always `publicKeyLength / 2`. It is named here rather than
+   * recomputed at each site because seed handling reads as arithmetic on a public key length
+   * otherwise, which is the sort of thing that survives review while being wrong.
+   */
+  readonly n: number
   readonly publicKeyLength: number
   readonly signatureLength: number
   readonly signer: SlhDsaSigner
@@ -85,6 +94,7 @@ const define = (
   paramId,
   argsPrefix: prefixFor(paramId, false),
   witnessPrefix: prefixFor(paramId, true),
+  n: publicKeyLength / 2,
   publicKeyLength,
   signatureLength,
   signer,
