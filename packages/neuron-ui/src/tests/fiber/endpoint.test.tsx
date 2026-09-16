@@ -28,7 +28,7 @@ describe('FiberEndpointForm', () => {
     const onChanged = vi.fn()
     render(<FiberEndpointForm onChanged={onChanged} />)
 
-    fireEvent.change(screen.getByLabelText('fiber.endpoint.url'), { target: { value: 'http://127.0.0.1:8231' } })
+    fireEvent.change(screen.getByTestId('fiber-url'), { target: { value: 'http://127.0.0.1:8231' } })
     fireEvent.click(screen.getByText('fiber.endpoint.save'))
 
     await waitFor(() => expect(fiberSetEndpoint).toHaveBeenCalledWith({ url: 'http://127.0.0.1:8231' }))
@@ -40,7 +40,7 @@ describe('FiberEndpointForm', () => {
     // silently drop the credential of a node that needs one.
     render(<FiberEndpointForm onChanged={vi.fn()} />)
 
-    fireEvent.change(screen.getByLabelText('fiber.endpoint.url'), { target: { value: 'http://node' } })
+    fireEvent.change(screen.getByTestId('fiber-url'), { target: { value: 'http://node' } })
     fireEvent.click(screen.getByText('fiber.endpoint.save'))
 
     await waitFor(() => expect(fiberSetEndpoint).toHaveBeenCalledWith({ url: 'http://node' }))
@@ -52,15 +52,15 @@ describe('FiberEndpointForm', () => {
     fiberGetEndpoint.mockResolvedValue({ status: 1, result: { url: 'http://node', hasToken: true } })
     render(<FiberEndpointForm onChanged={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByLabelText('fiber.endpoint.url')).toHaveValue('http://node'))
-    expect(screen.getByLabelText('fiber.endpoint.token')).toHaveValue('')
+    await waitFor(() => expect(screen.getByTestId('fiber-url')).toHaveValue('http://node'))
+    expect(screen.getByTestId('fiber-token')).toHaveValue('')
     expect(screen.getByTestId('token-note')).toHaveTextContent('fiber.endpoint.token-held')
   })
 
   it('masks the token field', async () => {
     render(<FiberEndpointForm onChanged={vi.fn()} />)
 
-    expect(screen.getByLabelText('fiber.endpoint.token')).toHaveAttribute('type', 'password')
+    expect(screen.getByTestId('fiber-token')).toHaveAttribute('type', 'password')
   })
 
   it('clears the endpoint on request', async () => {
@@ -68,7 +68,7 @@ describe('FiberEndpointForm', () => {
     const onChanged = vi.fn()
     render(<FiberEndpointForm onChanged={onChanged} />)
 
-    await waitFor(() => expect(screen.getByLabelText('fiber.endpoint.url')).toHaveValue('http://node'))
+    await waitFor(() => expect(screen.getByTestId('fiber-url')).toHaveValue('http://node'))
     fireEvent.click(screen.getByText('fiber.endpoint.clear'))
 
     await waitFor(() => expect(fiberClearEndpoint).toHaveBeenCalled())
@@ -80,7 +80,7 @@ describe('FiberEndpointForm', () => {
     const onChanged = vi.fn()
     render(<FiberEndpointForm onChanged={onChanged} />)
 
-    fireEvent.change(screen.getByLabelText('fiber.endpoint.url'), { target: { value: 'nonsense' } })
+    fireEvent.change(screen.getByTestId('fiber-url'), { target: { value: 'nonsense' } })
     fireEvent.click(screen.getByText('fiber.endpoint.save'))
 
     expect(await screen.findByTestId('endpoint-error')).toHaveTextContent('that address is not a URL')

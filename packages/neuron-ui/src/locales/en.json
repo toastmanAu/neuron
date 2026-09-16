@@ -1432,9 +1432,9 @@
     "fiber": {
       "no-channels": "This node has no channels yet.",
       "remedy": {
-        "configure": "No Fiber node is configured. Add an endpoint in settings.",
+        "configure": "No Fiber node is configured. Enter its address below.",
         "check-node": "The Fiber node is not answering. Check that it is running and the address is right.",
-        "check-token": "The Fiber node rejected the credential. Check the auth token in settings."
+        "check-token": "The Fiber node rejected the credential. Check the auth token below."
       },
       "endpoint": {
         "title": "Fiber node",
@@ -1445,7 +1445,13 @@
         "save": "Save",
         "clear": "Remove",
         "failed": "Could not save the endpoint"
-      }
+      },
+      "channels": "Channels",
+      "channel-state": "State",
+      "local-balance": "Local (CKB)",
+      "remote-balance": "Remote (CKB)",
+      "ready-channels": "Channels ready",
+      "sendable": "Sendable (CKB)"
     }
   }
 }

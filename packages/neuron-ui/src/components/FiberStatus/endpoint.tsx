@@ -1,10 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { fiberGetEndpoint, fiberSetEndpoint, fiberClearEndpoint } from 'services/remote'
+import Alert from 'widgets/Alert'
+import Button from 'widgets/Button'
+import TextField from 'widgets/TextField'
 import type { ControllerResponse, SuccessFromController } from 'services/remote/remoteApiWrapper'
+import styles from './fiberStatus.module.scss'
 
 // A type predicate, so the response union actually narrows.
 const isSuccess = <R,>(res: ControllerResponse<R>): res is SuccessFromController<R> => res.status === 1
+
+/** TextField's props carry a `[key: string]: any` index signature, which defeats inference on
+ * its own `onChange`, so the handler parameter has to be named. */
+type FieldChangeEvent = React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
 
 export interface FiberEndpointFormProps {
   /** Called after the endpoint changes, so the panel can re-check the node. */
@@ -73,31 +81,47 @@ const FiberEndpointForm = ({ onChanged }: FiberEndpointFormProps) => {
   }, [onChanged])
 
   return (
-    <div>
-      <h3>{t('fiber.endpoint.title')}</h3>
+    <div className={styles.card}>
+      <h3 className={styles.heading}>{t('fiber.endpoint.title')}</h3>
 
-      <label htmlFor="fiber-url">{t('fiber.endpoint.url')}</label>
-      <input id="fiber-url" value={url} placeholder="http://127.0.0.1:8227" onChange={e => setUrl(e.target.value)} />
-
-      <label htmlFor="fiber-token">{t('fiber.endpoint.token')}</label>
-      <input
-        id="fiber-token"
+      <TextField
+        className={styles.field}
+        field="fiber-url"
+        data-testid="fiber-url"
+        label={t('fiber.endpoint.url')}
+        value={url}
+        placeholder="http://127.0.0.1:8227"
+        onChange={(e: FieldChangeEvent) => setUrl(e.target.value)}
+        required
+      />
+      <TextField
+        className={styles.field}
+        field="fiber-token"
+        data-testid="fiber-token"
         type="password"
+        label={t('fiber.endpoint.token')}
         value={token}
         autoComplete="off"
         placeholder={hasToken ? t('fiber.endpoint.token-held') : ''}
-        onChange={e => setToken(e.target.value)}
+        onChange={(e: FieldChangeEvent) => setToken(e.target.value)}
       />
-      <p data-testid="token-note">{t(hasToken ? 'fiber.endpoint.token-held' : 'fiber.endpoint.token-optional')}</p>
 
-      {error ? <p data-testid="endpoint-error">{error}</p> : null}
+      <p className={styles.hint} data-testid="token-note">
+        {t(hasToken ? 'fiber.endpoint.token-held' : 'fiber.endpoint.token-optional')}
+      </p>
 
-      <button type="button" disabled={!url || busy} onClick={save}>
-        {t('fiber.endpoint.save')}
-      </button>
-      <button type="button" disabled={busy || !url} onClick={clear}>
-        {t('fiber.endpoint.clear')}
-      </button>
+      {error ? (
+        <ul className={styles.notices}>
+          <Alert status="error" data-testid="endpoint-error">
+            {error}
+          </Alert>
+        </ul>
+      ) : null}
+
+      <div className={styles.actions}>
+        <Button type="primary" label={t('fiber.endpoint.save')} disabled={!url || busy} loading={busy} onClick={save} />
+        <Button type="text" label={t('fiber.endpoint.clear')} disabled={busy || !url} onClick={clear} />
+      </div>
     </div>
   )
 }

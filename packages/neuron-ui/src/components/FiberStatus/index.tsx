@@ -2,8 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { fiberListChannels, fiberStatus } from 'services/remote'
 import { fiberConnectionState, fiberRemedyKey, shannonsToCkb, summariseChannels } from 'utils/fiber'
+import Alert from 'widgets/Alert'
+import Table from 'widgets/Table'
 import type { ControllerResponse, SuccessFromController } from 'services/remote/remoteApiWrapper'
 import FiberEndpointForm from './endpoint'
+import styles from './fiberStatus.module.scss'
 
 // A type predicate, so the response union actually narrows. Without `res is ...` the
 // compiler keeps both arms and `result` does not exist on the failure one.
@@ -52,26 +55,84 @@ const FiberPanel = () => {
   }
 
   return (
-    <div>
-      <p data-testid="fiber-state">{state}</p>
+    <div className={styles.container}>
+      <div className={styles.card}>
+        <div className={styles.stateRow}>
+          <span className={styles.state} data-state={state} data-testid="fiber-state">
+            {state}
+          </span>
+          {status.version ? (
+            <span className={styles.version} data-testid="fiber-version">
+              {status.version}
+            </span>
+          ) : null}
+        </div>
+
+        {remedy ? (
+          <ul className={styles.notices}>
+            <Alert status="warn" data-testid="fiber-remedy">
+              {t(remedy)}
+            </Alert>
+          </ul>
+        ) : null}
+
+        {state === 'connected' ? (
+          <dl className={styles.summary}>
+            <div className={styles.metric}>
+              <dt>{t('fiber.ready-channels')}</dt>
+              <dd data-testid="channel-count">{summary.ready}</dd>
+            </div>
+            <div className={styles.metric}>
+              <dt>{t('fiber.sendable')}</dt>
+              <dd className={styles.balance} data-testid="sendable">
+                {shannonsToCkb(summary.sendable)}
+              </dd>
+            </div>
+          </dl>
+        ) : null}
+      </div>
+
       <FiberEndpointForm onChanged={recheck} />
-      {status.version ? <p data-testid="fiber-version">{status.version}</p> : null}
-      {remedy ? <p data-testid="fiber-remedy">{t(remedy)}</p> : null}
 
       {state === 'connected' ? (
-        <div>
-          <p data-testid="channel-count">{summary.ready}</p>
-          <p data-testid="sendable">{shannonsToCkb(summary.sendable)}</p>
+        <div className={styles.card}>
+          <h3 className={styles.heading}>{t('fiber.channels')}</h3>
           {channels.length === 0 ? (
-            <p data-testid="no-channels">{t('fiber.no-channels')}</p>
+            <p className={styles.empty} data-testid="no-channels">
+              {t('fiber.no-channels')}
+            </p>
           ) : (
-            <ul>
-              {channels.map(channel => (
-                <li key={channel.channelId} data-testid={`channel-${channel.channelId}`}>
-                  {channel.stateName} — {shannonsToCkb(channel.localBalance)} / {shannonsToCkb(channel.remoteBalance)}
-                </li>
-              ))}
-            </ul>
+            <Table
+              head={null}
+              columns={[
+                {
+                  title: t('fiber.channel-state'),
+                  dataIndex: 'stateName',
+                  render: (_, __, item) => <span data-testid={`channel-${item.channelId}`}>{item.stateName}</span>,
+                },
+                {
+                  title: t('fiber.local-balance'),
+                  dataIndex: 'localBalance',
+                  align: 'right',
+                  render: (_, __, item) => (
+                    <span className={styles.balance} data-testid={`channel-${item.channelId}-local`}>
+                      {shannonsToCkb(item.localBalance)}
+                    </span>
+                  ),
+                },
+                {
+                  title: t('fiber.remote-balance'),
+                  dataIndex: 'remoteBalance',
+                  align: 'right',
+                  render: (_, __, item) => (
+                    <span className={styles.balance} data-testid={`channel-${item.channelId}-remote`}>
+                      {shannonsToCkb(item.remoteBalance)}
+                    </span>
+                  ),
+                },
+              ]}
+              dataSource={channels}
+            />
           )}
         </div>
       ) : null}

@@ -73,7 +73,11 @@ describe('FiberPanel', () => {
   it('lists channels with balances in CKB rather than shannons', async () => {
     render(<FiberPanel />)
 
-    expect(await screen.findByTestId('channel-0xa1186f6abbd2661f')).toHaveTextContent('51')
+    // Each side of the channel is now its own column, so the balance is asserted where it is shown
+    // rather than by matching a substring of the whole row.
+    expect(await screen.findByTestId('channel-0xa1186f6abbd2661f')).toHaveTextContent('ChannelReady')
+    expect(await screen.findByTestId('channel-0xa1186f6abbd2661f-local')).toHaveTextContent('51')
+    expect(await screen.findByTestId('channel-0xa1186f6abbd2661f-remote')).toHaveTextContent('0')
   })
 
   it('does not fetch channels when the node is not reachable', async () => {
