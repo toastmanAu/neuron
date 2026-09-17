@@ -7,6 +7,8 @@ import SUDTUpdateDialog, { SUDTUpdateDialogProps } from 'components/SUDTUpdateDi
 import Button from 'widgets/Button'
 import Spinner, { SpinnerSize } from 'widgets/Spinner'
 import PageContainer from 'components/PageContainer'
+import Alert from 'widgets/Alert'
+import { assetAccountsUnavailableReason } from 'utils/assetAccounts'
 import Experiment from 'widgets/Icons/Experiment.svg?react'
 import EyesOpen from 'widgets/Icons/EyesOpen.svg?react'
 import EyesClose from 'widgets/Icons/EyesClose.svg?react'
@@ -39,7 +41,7 @@ const SUDTAccountList = () => {
   const [t] = useTranslation()
   const navigate = useNavigate()
   const {
-    wallet: { id: walletId, balance },
+    wallet: { id: walletId, balance, lockProviderId },
     chain: { networkID },
     settings: { networks = [] },
     sUDTAccounts,
@@ -170,6 +172,10 @@ const SUDTAccountList = () => {
     t,
   })
 
+  // Checked here rather than left to the transaction generator, which can only refuse at the last
+  // step — long after the user has pressed "create asset account" and filled in a token.
+  const unavailableReason = assetAccountsUnavailableReason(lockProviderId)
+
   const onOpenCreateDialog = useCallback(() => {
     setDialog({ id: '', action: 'create' })
   }, [setDialog])
@@ -252,10 +258,20 @@ const SUDTAccountList = () => {
             <Search />
             <input value={keyword} placeholder={t('s-udt.account-list.search')} onChange={onKeywordChange} />
           </div>
-          <button type="button" onClick={onOpenCreateDialog} className={styles.addBtn}>
-            <AddSimple /> {t('s-udt.create-dialog.create-asset-account')}
-          </button>
+          {unavailableReason ? null : (
+            <button type="button" onClick={onOpenCreateDialog} className={styles.addBtn}>
+              <AddSimple /> {t('s-udt.create-dialog.create-asset-account')}
+            </button>
+          )}
         </div>
+
+        {unavailableReason ? (
+          <ul className={styles.notices}>
+            <Alert status="warn" data-testid="asset-accounts-unavailable">
+              {t(unavailableReason)}
+            </Alert>
+          </ul>
+        ) : null}
 
         {isLoaded ? (
           <>

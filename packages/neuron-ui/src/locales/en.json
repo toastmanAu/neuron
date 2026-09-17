@@ -1046,7 +1046,8 @@
         "syncing": "Syncing, current data may be inaccurate",
         "send": "Send",
         "receive": "Receive",
-        "set-account-info": "Set Account Info"
+        "set-account-info": "Set Account Info",
+        "unavailable-for-lock-provider": "Asset accounts are not available for this wallet. They are held under the anyone-can-pay lock, which only verifies secp256k1 signatures, and this wallet signs with SLH-DSA."
       },
       "create-dialog": {
         "create-asset-account": "Create Asset Account",

@@ -248,8 +248,10 @@ describe('sending the whole balance from a provider-backed lock', () => {
     expect(gatherAllSpy.mock.calls[0][1]).toMatchObject({
       codeHash: PQ_LOCK.codeHash,
       hashType: PQ_LOCK.hashType,
-      args: PQ_LOCK.args,
     })
+    // And NO args: a lock class carrying args is routed to the multisig_output table, where a
+    // provider wallet has no cells, and the user is told their balance is insufficient.
+    expect(gatherAllSpy.mock.calls[0][1]).not.toHaveProperty('args')
   })
 
   it("uses the provider's cell dep", async () => {
