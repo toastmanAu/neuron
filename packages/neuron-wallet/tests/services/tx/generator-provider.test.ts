@@ -174,10 +174,17 @@ describe('depositing the whole balance from a provider-backed lock', () => {
     // "capacity not enough" for a wallet that is holding plenty.
     await generate().catch(() => {})
 
-    expect(gatherAllSpy).toHaveBeenCalledWith(
-      'w',
-      expect.objectContaining({ codeHash: PQ_LOCK.codeHash, hashType: PQ_LOCK.hashType, args: PQ_LOCK.args })
-    )
+    // On the argument rather than the whole call: gatherAllInputs takes trailing optionals whose
+    // values are not what this test is about.
+    expect(gatherAllSpy.mock.calls[0][0]).toBe('w')
+    expect(gatherAllSpy.mock.calls[0][1]).toMatchObject({
+      codeHash: PQ_LOCK.codeHash,
+      hashType: PQ_LOCK.hashType,
+    })
+    // And NO args. This assertion used to require args and so encoded the bug it was meant to
+    // catch: gatherAllInputs sends any lock class carrying args to the multisig_output table, where
+    // a provider wallet has no cells, and the user is told their balance is insufficient.
+    expect(gatherAllSpy.mock.calls[0][1]).not.toHaveProperty('args')
   })
 
   it("uses the provider's cell dep", async () => {

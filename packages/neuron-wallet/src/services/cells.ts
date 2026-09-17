@@ -261,10 +261,22 @@ export default class CellsService {
         ) AND ${
           lockArgs
             ? `output.lockArgs = :lockArgs`
-            : `output.lockArgs in (
-          SELECT publicKeyInBlake160
-          FROM hd_public_key_info
-          WHERE walletId = :walletId)`
+            : // A provider-backed wallet has no rows in hd_public_key_info, so the original
+              // subquery was empty and its deposits were invisible while sitting on chain. The
+              // identity branch matches the WHOLE script — args alone would collide across code
+              // hashes.
+              `(
+          output.lockArgs in (
+            SELECT publicKeyInBlake160
+            FROM hd_public_key_info
+            WHERE walletId = :walletId)
+          OR EXISTS (
+            SELECT 1 FROM script_identity si
+            WHERE si.walletId = :walletId
+              AND si.lockArgs = output.lockArgs
+              AND si.lockCodeHash = output.lockCodeHash
+              AND si.lockHashType = output.lockHashType)
+        )`
         }`,
         {
           walletId,

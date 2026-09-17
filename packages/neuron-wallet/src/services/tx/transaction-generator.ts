@@ -557,9 +557,10 @@ export class TransactionGenerator {
 
     // A provider-backed lock is not secp, so its cells are not found by the default filter. Asking
     // for the wrong ones reports "capacity not enough" for a wallet that is holding plenty.
-    const providerLock = lockClass.cellDep
-      ? { codeHash: lockClass.codeHash, hashType: lockClass.hashType, args: lockClass.lockArgs[0] }
-      : undefined
+    //
+    // Deliberately WITHOUT `args`: `gatherAllInputs` routes a lock class carrying args to the
+    // multisig_output table, where a provider wallet has no cells at all.
+    const providerLock = lockClass.cellDep ? { codeHash: lockClass.codeHash, hashType: lockClass.hashType } : undefined
 
     const allInputs: Input[] = await CellsService.gatherAllInputs(
       walletId,

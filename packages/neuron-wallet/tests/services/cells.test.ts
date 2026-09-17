@@ -984,6 +984,69 @@ describe('CellsService', () => {
       ],
     })
 
+    it('lists a deposit made by a provider-backed wallet', async () => {
+      // Confirmed on testnet: a DAO deposit from a quantum-resistant wallet was committed on chain
+      // and visible in the explorer, while the Nervos DAO page showed nothing. The query selected
+      // lockArgs from hd_public_key_info, and a provider-backed wallet has no rows there — the same
+      // assumption that made its balance and history empty, in an eighth place.
+      const pqWalletId = 'pq-dao-wallet'
+      const pqLock = new Script(`0x${'c3'.repeat(32)}`, `0x${'d4'.repeat(32)}`, ScriptHashType.Data1)
+
+      await getConnection()
+        .getRepository(ScriptIdentityEntity)
+        .save(
+          ScriptIdentityEntity.fromModel(
+            ScriptIdentity.fromObject({
+              walletId: pqWalletId,
+              providerId: 'slh-dsa-fips205',
+              addressType: 0,
+              addressIndex: 0,
+              address: 'ckt1qq-pq-dao',
+              lockCodeHash: pqLock.codeHash,
+              lockHashType: pqLock.hashType,
+              lockArgs: pqLock.args,
+              derivationPath: `vault:${pqWalletId}`,
+              publicKey: `0x${'cd'.repeat(32)}`,
+              metadata: { parameterSet: 'SLH-DSA-SHA2-128s' },
+            })
+          )
+        )
+
+      const pqDepositTx = Transaction.fromObject({
+        hash: '0x' + '7'.repeat(64),
+        version: '0x0',
+        timestamp: '1572862777999',
+        status: TransactionStatus.Success,
+        witnesses: [],
+        blockNumber: '2',
+        blockHash: '0x' + '8'.repeat(64),
+        inputs: [],
+        outputs: [
+          Output.fromObject({
+            capacity: toShannon('10200'),
+            daoData: depositData,
+            lock: pqLock,
+            type: SystemScriptInfo.generateDaoScript(),
+          }),
+        ],
+      })
+      await TransactionPersistor.saveFetchTx(pqDepositTx)
+
+      const daoCells = await CellsService.getDaoCells(pqWalletId)
+
+      expect(daoCells.length).toEqual(1)
+      expect(daoCells[0]!.outPoint!.txHash).toEqual(pqDepositTx.hash)
+    })
+
+    it('does not hand one wallet another wallet DAO cells', async () => {
+      // The fix widens an ownership test, so the boundary it widens has to stay closed.
+      await TransactionPersistor.saveFetchTx(depositTx)
+
+      const daoCells = await CellsService.getDaoCells('some-other-wallet')
+
+      expect(daoCells.length).toEqual(0)
+    })
+
     it('deposit', async () => {
       await TransactionPersistor.saveFetchTx(depositTx)
 
