@@ -78,6 +78,23 @@ export class WalletFunctionNotSupported extends Error {
   }
 }
 
+/**
+ * Raised when a feature needs a lock that cannot verify this wallet's signatures.
+ *
+ * Asset accounts are the case this exists for. They are held under the deployed `anyone_can_pay`
+ * lock, whose args are a 20-byte secp public key hash and which verifies a secp signature. A
+ * quantum-resistant wallet has neither, so the account could be created but never spent — the cell
+ * would be locked to a key nobody holds. Refusing with a reason beats producing that cell, and
+ * beats the bare "does not support" message this used to surface as.
+ */
+export class LockProviderFeatureUnavailable extends Error {
+  constructor(feature: string) {
+    super(
+      `${feature} is not available for this wallet. It requires the anyone-can-pay lock, which only verifies secp256k1 signatures, and this wallet signs with SLH-DSA.`
+    )
+  }
+}
+
 export class DuplicateImportWallet extends Error {
   public code = 118
   constructor(errorStr: string) {

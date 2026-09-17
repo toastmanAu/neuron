@@ -779,6 +779,8 @@ export default class TransactionSender {
       capacity: BigInt(item.capacity).toString(),
     }))
 
+    const provider = await this.providerLockClassFor(walletID)
+
     const tx: Transaction = await TransactionGenerator.generateSendingAllTx({
       walletID,
       targetOutputs,
@@ -786,6 +788,7 @@ export default class TransactionSender {
       feeRate,
       consumeOutPoints,
       enableUseSentCell,
+      lockClass: provider?.lockClass,
     })
 
     return tx

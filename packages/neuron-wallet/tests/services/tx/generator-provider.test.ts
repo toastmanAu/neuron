@@ -204,3 +204,69 @@ describe('depositing the whole balance from a provider-backed lock', () => {
     expect(gathered - deposited).toBeGreaterThanOrEqual(BigInt(73_00_000_000))
   })
 })
+
+describe('sending the whole balance from a provider-backed lock', () => {
+  const gatherAllSpy = jest.spyOn(CellsService, 'gatherAllInputs')
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    getTipHeaderMock.mockResolvedValue({ epoch: '0x0', timestamp: '0x0', number: '0x0' })
+    gatherAllSpy.mockResolvedValue([
+      Input.fromObject({
+        previousOutput: new OutPoint(`0x${'ee'.repeat(32)}`, '0'),
+        since: '0',
+        capacity: '100000000000',
+        lock: PQ_LOCK,
+        lockHash: PQ_LOCK.computeHash(),
+      }),
+    ])
+  })
+
+  const generate = () =>
+    TransactionGenerator.generateSendingAllTx({
+      walletID: 'w',
+      targetOutputs: [{ address: PQ_ADDRESS, capacity: '0' }],
+      fee: '0',
+      feeRate: '1000',
+      lockClass: {
+        lockArgs: [PQ_LOCK.args],
+        codeHash: PQ_LOCK.codeHash,
+        hashType: PQ_LOCK.hashType,
+        cellDep: PQ_DEP,
+        witnessSize: SLH_DSA_128S_WITNESS,
+      },
+    })
+
+  it("gathers the provider's cells, not secp cells", async () => {
+    // Without this it asks for cells under the secp code hash, finds none, and reports that the
+    // wallet has nothing to send.
+    await generate().catch(() => {})
+
+    // On the argument rather than the whole call: gatherAllInputs takes trailing optionals whose
+    // values are not what this test is about.
+    expect(gatherAllSpy.mock.calls[0][0]).toBe('w')
+    expect(gatherAllSpy.mock.calls[0][1]).toMatchObject({
+      codeHash: PQ_LOCK.codeHash,
+      hashType: PQ_LOCK.hashType,
+      args: PQ_LOCK.args,
+    })
+  })
+
+  it("uses the provider's cell dep", async () => {
+    const tx = await generate()
+
+    expect(tx.cellDeps.map(dep => dep.outPoint!.txHash)).toContain(PQ_DEP.outPoint!.txHash)
+  })
+
+  it('prices the transaction with the provider witness, not a 93 byte secp one', async () => {
+    // Send-max puts the entire balance in the output and subtracts the fee, so an under-counted fee
+    // is not merely cheap: the transaction is rejected by the pool for underpaying.
+    const tx = await generate()
+
+    const sent = BigInt(tx.outputs[0].capacity)
+    const gathered = BigInt('100000000000')
+    const fee = gathered - sent
+    // A 7.9 KB witness at 1000 shannons/KB is ~8000 shannons; a 93 byte one is ~200.
+    expect(fee).toBeGreaterThan(BigInt(5000))
+  })
+})

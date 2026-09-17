@@ -1,3 +1,4 @@
+import { assertAssetAccountsUsable } from './asset-account-service'
 import AssetAccountInfo from '../models/asset-account-info'
 import AddressParser from '../models/address-parser'
 import { TransactionGenerator } from './tx'
@@ -34,6 +35,8 @@ export default class AnyoneCanPayService {
     fee: string = '0',
     description?: string
   ): Promise<Transaction> {
+    assertAssetAccountsUsable(walletID)
+
     const assetAccount = await getConnection()
       .getRepository(AssetAccountEntity)
       .createQueryBuilder('aa')

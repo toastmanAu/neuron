@@ -7,7 +7,7 @@ import AssetAccountInfo from '../models/asset-account-info'
 import { OutputStatus } from '../models/chain/output'
 import AssetAccount from '../models/asset-account'
 import AssetAccountEntity from '../database/chain/entities/asset-account'
-import { CapacityNotEnoughForChange } from '../exceptions'
+import { CapacityNotEnoughForChange, LockProviderFeatureUnavailable } from '../exceptions'
 import CellsService from '../services/cells'
 import TransactionSender from './transaction-sender'
 import { TransactionGenerator } from './tx'
@@ -17,6 +17,25 @@ import SystemScriptInfo from '../models/system-script-info'
 import Input from '../models/chain/input'
 import { MIN_CELL_CAPACITY, UDTType } from '../utils/const'
 import SudtTokenInfoService from './sudt-token-info'
+
+/**
+ * Refuse asset accounts for a wallet the anyone-can-pay lock cannot unlock.
+ *
+ * An asset account is a cell under the deployed `anyone_can_pay` lock: its args are a 20-byte
+ * secp256k1 public key hash and it verifies a secp256k1 signature. A provider-backed wallet has
+ * neither, so an account created for one could be funded and never spent — capacity locked to a key
+ * nobody holds. This is not a wiring gap that a lock class would close; it needs an
+ * anyone-can-pay deployment that can verify this wallet's signatures, and none exists.
+ *
+ * Keyed on the lock provider rather than on "not an HD wallet", because a hardware wallet is also
+ * not HD and asset accounts work for it.
+ */
+export const assertAssetAccountsUsable = (walletID: string): void => {
+  const wallet = WalletService.getInstance().get(walletID)
+  if (wallet.getLockProviderId?.()) {
+    throw new LockProviderFeatureUnavailable('Asset accounts')
+  }
+}
 
 export default class AssetAccountService {
   public static async getACPCells(
@@ -281,6 +300,7 @@ export default class AssetAccountService {
     if (tokenID !== 'CKBytes' && !tokenID.startsWith('0x')) {
       throw new Error('TokenID must be CKBytes or start with 0x')
     }
+    assertAssetAccountsUsable(walletID)
 
     // 1. find next unused address
     const wallet = WalletService.getInstance().get(walletID)

@@ -304,6 +304,7 @@ export class TransactionGenerator {
     multisigConfig,
     consumeOutPoints,
     enableUseSentCell,
+    lockClass,
   }: {
     walletID: string
     targetOutputs: TargetOutput[]
@@ -312,9 +313,25 @@ export class TransactionGenerator {
     multisigConfig?: MultisigConfigModel
     consumeOutPoints?: CKBComponents.OutPoint[]
     enableUseSentCell?: boolean
+    /**
+     * The lock to spend from, for a wallet whose cells are not secp.
+     *
+     * Send-max is the one path where getting this wrong fails quietly: with the secp filter it
+     * simply finds no cells and reports an empty wallet, and with the secp witness size it
+     * underprices the transaction by the whole size of the real witness.
+     */
+    lockClass?: {
+      lockArgs: string[]
+      codeHash: string
+      hashType: ScriptHashType
+      cellDep?: CellDep
+      witnessSize?: number
+    }
   }): Promise<Transaction> => {
     let cellDep: CellDep
-    if (multisigConfig) {
+    if (lockClass?.cellDep) {
+      cellDep = lockClass.cellDep
+    } else if (multisigConfig) {
       cellDep = await SystemScriptInfo.getInstance().getMultiSignCellDep(multisigConfig.lockCodeHash)
     } else {
       cellDep = await SystemScriptInfo.getInstance().getSecpCellDep()
@@ -327,6 +344,14 @@ export class TransactionGenerator {
     const feeRateInt = BigInt(feeRate)
     const mode = new FeeMode(feeRateInt)
 
+    // Deliberately WITHOUT `args`. `gatherAllInputs` routes any lock class carrying args to
+    // `getLiveOrSentCellByLockArgsMultisigOutput`, which reads the multisig_output table — a
+    // provider wallet's cells are in the ordinary output table, so that branch finds nothing and
+    // the wallet reports an empty balance. Code hash and hash type alone take the walletId branch,
+    // which already resolves provider identities by lock hash.
+    const providerLock = lockClass?.cellDep
+      ? { codeHash: lockClass.codeHash, hashType: lockClass.hashType }
+      : undefined
     const allInputs: Input[] = await CellsService.gatherAllInputs(
       walletID,
       multisigConfig
@@ -339,7 +364,7 @@ export class TransactionGenerator {
               multisigConfig.lockCodeHash
             )
           )
-        : undefined,
+        : providerLock,
       consumeOutPoints,
       enableUseSentCell
     )
@@ -391,12 +416,17 @@ export class TransactionGenerator {
     let finalFee: bigint = feeInt
     const lockHashes = new Set(allInputs.map(i => i.lockHash!))
     const keyCount: number = lockHashes.size
+    const perLockWitness = (() => {
+      if (multisigConfig) {
+        return TransactionSize.multiSignWitness(multisigConfig.r, multisigConfig.m, multisigConfig.n)
+      }
+      // One witness per distinct lock. A provider witness is kilobytes where secp's is 93 bytes,
+      // and send-max subtracts the fee from the amount sent, so under-counting here is not a cheap
+      // transaction but a rejected one.
+      return lockClass?.witnessSize ?? TransactionSize.secpLockWitness() * keyCount
+    })()
     const txSize: number =
-      TransactionSize.tx(tx) +
-      (multisigConfig
-        ? TransactionSize.multiSignWitness(multisigConfig.r, multisigConfig.m, multisigConfig.n)
-        : TransactionSize.secpLockWitness() * keyCount) +
-      TransactionSize.emptyWitness() * (allInputs.length - keyCount)
+      TransactionSize.tx(tx) + perLockWitness + TransactionSize.emptyWitness() * (allInputs.length - keyCount)
     if (mode.isFeeRateMode()) {
       finalFee = TransactionFee.fee(txSize, feeRateInt)
     }

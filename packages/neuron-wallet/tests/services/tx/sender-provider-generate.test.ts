@@ -1,12 +1,16 @@
 import 'dotenv/config'
 
 const generateTxMock = jest.fn()
+const generateSendingAllTxMock = jest.fn()
 const getByWalletIdMock = jest.fn()
 const getWalletMock = jest.fn()
 const getCurrentNetworkMock = jest.fn()
 
 jest.mock('../../../src/services/tx/transaction-generator', () => ({
-  TransactionGenerator: { generateTx: (...a: unknown[]) => generateTxMock(...a) },
+  TransactionGenerator: {
+    generateTx: (...a: unknown[]) => generateTxMock(...a),
+    generateSendingAllTx: (...a: unknown[]) => generateSendingAllTxMock(...a),
+  },
 }))
 jest.mock('../../../src/services/script-identities', () => ({
   __esModule: true,
@@ -64,6 +68,7 @@ describe('TransactionSender.generateTx for a provider-backed wallet', () => {
     getWalletMock.mockReturnValue({ isHardware: () => false, getLockProviderId: () => 'slh-dsa-fips205' })
     getByWalletIdMock.mockResolvedValue([identity])
     generateTxMock.mockResolvedValue({ hash: '0xdead' })
+    generateSendingAllTxMock.mockResolvedValue({ hash: '0xdead' })
   })
 
   const generate = () =>
@@ -122,5 +127,47 @@ describe('TransactionSender.generateTx for a provider-backed wallet', () => {
 
     expect(generateTxMock.mock.calls[0][0].lockClass).toBeUndefined()
     expect(getByWalletIdMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('TransactionSender.generateSendingAllTx for a provider-backed wallet', () => {
+  const sender = new TransactionSender()
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    getCurrentNetworkMock.mockReturnValue(network)
+    getWalletMock.mockReturnValue({ isHardware: () => false, getLockProviderId: () => 'slh-dsa-fips205' })
+    getByWalletIdMock.mockResolvedValue([identity])
+    generateSendingAllTxMock.mockResolvedValue({ hash: '0xdead' })
+  })
+
+  const sendAll = () =>
+    sender.generateSendingAllTx({
+      walletID: 'pq',
+      items: [{ address: 'ckt1qq-target', capacity: '0' }],
+      fee: '0',
+      feeRate: '1000',
+    })
+
+  it("passes the provider's lock so it does not silently find nothing to send", async () => {
+    // This path used to take no lock at all: it gathered secp cells, found none, and told the user
+    // the wallet was empty. No error, no modal — just a wrong answer.
+    await sendAll()
+
+    const { lockClass } = generateSendingAllTxMock.mock.calls[0][0]
+    expect(lockClass).toMatchObject({
+      codeHash: TESTNET_CODE_HASH,
+      hashType: ScriptHashType.Data1,
+      witnessSize: estimateWitnessSize('SLH-DSA-SHA2-128s'),
+    })
+    expect(lockClass.cellDep.outPoint.txHash).toBe('0x631d9a6049fb1fc3790e89d9daf35abe535b5e754cd8c3404319319710f0b106')
+  })
+
+  it('leaves a legacy wallet with no lock class', async () => {
+    getWalletMock.mockReturnValue({ isHardware: () => false, getLockProviderId: () => undefined })
+
+    await sendAll()
+
+    expect(generateSendingAllTxMock.mock.calls[0][0].lockClass).toBeUndefined()
   })
 })
