@@ -662,6 +662,18 @@ export default class TransactionSender {
    * the network it was derived for; a mismatch is refused rather than silently producing a
    * transaction against a script that does not exist here.
    */
+  /**
+   * The provider lock class for this wallet, or undefined if it is an ordinary HD wallet.
+   *
+   * Every transaction path needs the same three things for a provider-backed wallet — its address,
+   * its cell dep and its witness size — and originally only the plain send path asked for them.
+   * Everything else called the HD-only address methods and refused the wallet outright.
+   */
+  private async providerLockClassFor(walletID: string) {
+    const providerId = this.walletService.get(walletID).getLockProviderId?.()
+    return providerId ? this.resolveProviderLockClass(walletID, providerId) : undefined
+  }
+
   private async resolveProviderLockClass(walletID: string, providerId: string) {
     const network = NetworksService.getInstance().getCurrent()
     const identities = await ScriptIdentityService.getByWalletId(walletID)
@@ -916,6 +928,20 @@ export default class TransactionSender {
     fee: string = '0',
     feeRate: string = '0'
   ): Promise<Transaction> => {
+    const provider = await this.providerLockClassFor(walletID)
+    if (provider) {
+      // One address: the deposit and any change both return to the wallet's own lock.
+      return TransactionGenerator.generateDepositTx(
+        walletID,
+        capacity,
+        provider.changeAddress,
+        provider.changeAddress,
+        fee,
+        feeRate,
+        provider.lockClass
+      )
+    }
+
     const wallet = WalletService.getInstance().get(walletID)
 
     const address = await wallet.getNextAddress()
@@ -989,17 +1015,19 @@ export default class TransactionSender {
 
     const depositBlockHeader = await rpcService.getHeader(prevTx.txStatus.blockHash!)
 
+    const provider = await this.providerLockClassFor(walletID)
     const wallet = WalletService.getInstance().get(walletID)
-    const changeAddress = await wallet.getNextChangeAddress()
+    const changeAddress = provider ? provider.changeAddress : (await wallet.getNextChangeAddress())!.address
     const tx: Transaction = await TransactionGenerator.startWithdrawFromDao(
       walletID,
       outPoint,
       depositOutput,
       depositBlockHeader!.number,
       depositBlockHeader!.hash,
-      changeAddress!.address,
+      changeAddress,
       fee,
-      feeRate
+      feeRate,
+      provider?.lockClass
     )
 
     return tx
@@ -1079,9 +1107,10 @@ export default class TransactionSender {
       throw new TransactionIsNotCommittedYet()
     }
 
+    const withdrawProvider = multisigConfig ? undefined : await this.providerLockClassFor(walletID)
     const cellDep = multisigConfig
       ? await SystemScriptInfo.getInstance().getMultiSignCellDep(multisigConfig.lockCodeHash)
-      : await SystemScriptInfo.getInstance().getSecpCellDep()
+      : withdrawProvider?.lockClass.cellDep ?? (await SystemScriptInfo.getInstance().getSecpCellDep())
     const daoCellDep = await SystemScriptInfo.getInstance().getDaoCellDep()
 
     const content = withdrawOutput.daoData
@@ -1131,6 +1160,13 @@ export default class TransactionSender {
         multisigConfig.lockCodeHash
       )
       output = new Output(outputCapacity.toString(), lockScript, undefined, '0x')
+    } else if (withdrawProvider) {
+      // The wallet's own lock, taken whole. Rebuilding it as `Script(SECP_CODE_HASH, args)` the way
+      // the branch below does would pay the withdrawal to a lock nobody holds the key for —
+      // `AddressParser.toBlake160` refuses a non-secp address rather than allowing that, which is
+      // why this path reported "not short address" instead of working.
+      const { codeHash, hashType, lockArgs } = withdrawProvider.lockClass
+      output = new Output(outputCapacity.toString(), new Script(codeHash, lockArgs[0], hashType), undefined, '0x')
     } else {
       const wallet = WalletService.getInstance().get(walletID)
       const address = await wallet.getNextAddress()
@@ -1167,7 +1203,13 @@ export default class TransactionSender {
       interest: (BigInt(outputCapacity) - depositCapacity).toString(),
     })
     if (mode.isFeeRateMode()) {
-      const txSize: number = TransactionSize.tx(tx)
+      // `tx` carries a secp-shaped placeholder witness. An SLH-DSA witness is kilobytes rather than
+      // 93 bytes, so pricing the transaction as built would underpay by roughly its whole size and
+      // the pool would reject it.
+      const witnessDelta = withdrawProvider
+        ? withdrawProvider.lockClass.witnessSize - TransactionSize.secpLockWitness()
+        : 0
+      const txSize: number = TransactionSize.tx(tx) + witnessDelta
       const txFee: bigint = TransactionFee.fee(txSize, BigInt(feeRate))
       tx.fee = txFee.toString()
       tx.outputs[0].capacity = (outputCapacity - txFee).toString()
@@ -1187,6 +1229,19 @@ export default class TransactionSender {
     fee: string = '0',
     feeRate: string = '0'
   ): Promise<Transaction> => {
+    const provider = await this.providerLockClassFor(walletID)
+    if (provider) {
+      return TransactionGenerator.generateDepositAllTx(
+        walletID,
+        provider.changeAddress,
+        provider.changeAddress,
+        isBalanceReserved,
+        fee,
+        feeRate,
+        provider.lockClass
+      )
+    }
+
     const wallet = WalletService.getInstance().get(walletID)
     const receiveAddress = await wallet.getNextAddress()
     const changeAddress = await wallet.getNextChangeAddress()

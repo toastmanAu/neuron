@@ -439,7 +439,15 @@ export class TransactionGenerator {
     changeAddress: string,
     fee: string = '0',
     feeRate: string = '0',
-    lockClass = {
+    lockClass: {
+      lockArgs: string[]
+      codeHash: string
+      hashType: ScriptHashType
+      /** Cell dep for a lock deployed outside the genesis block. Omitted for secp and multisig. */
+      cellDep?: CellDep
+      /** First-witness size in a script group, for fee estimation. Omitted for secp. */
+      witnessSize?: number
+    } = {
       lockArgs: [''],
       codeHash: SystemScriptInfo.SECP_CODE_HASH,
       hashType: ScriptHashType.Type,
@@ -447,7 +455,9 @@ export class TransactionGenerator {
     multisigConfig?: MultisigConfigModel
   ): Promise<Transaction> => {
     let cellDep: CellDep
-    if (SystemScriptInfo.isMultiSignCodeHash(lockClass.codeHash)) {
+    if (lockClass.cellDep) {
+      cellDep = lockClass.cellDep
+    } else if (SystemScriptInfo.isMultiSignCodeHash(lockClass.codeHash)) {
       cellDep = await SystemScriptInfo.getInstance().getMultiSignCellDep(lockClass.codeHash)
     } else {
       cellDep = await SystemScriptInfo.getInstance().getSecpCellDep()
@@ -485,7 +495,10 @@ export class TransactionGenerator {
       TransactionGenerator.CHANGE_OUTPUT_DATA_SIZE,
       undefined,
       lockClass,
-      multisigConfig ? [multisigConfig] : []
+      multisigConfig ? [multisigConfig] : [],
+      undefined,
+      undefined,
+      lockClass.witnessSize
     )
     const finalFeeInt = BigInt(finalFee)
     tx.inputs = inputs
@@ -513,7 +526,15 @@ export class TransactionGenerator {
     isBalanceReserved = true,
     fee: string = '0',
     feeRate: string = '0',
-    lockClass = {
+    lockClass: {
+      lockArgs: string[]
+      codeHash: string
+      hashType: ScriptHashType
+      /** Cell dep for a lock deployed outside the genesis block. Omitted for secp and multisig. */
+      cellDep?: CellDep
+      /** First-witness size in a script group, for fee estimation. Omitted for secp. */
+      witnessSize?: number
+    } = {
       lockArgs: [''],
       codeHash: SystemScriptInfo.SECP_CODE_HASH,
       hashType: ScriptHashType.Type,
@@ -521,7 +542,9 @@ export class TransactionGenerator {
     multisigConfig?: MultisigConfigModel
   ): Promise<Transaction> => {
     let cellDep: CellDep
-    if (SystemScriptInfo.isMultiSignCodeHash(lockClass.codeHash)) {
+    if (lockClass.cellDep) {
+      cellDep = lockClass.cellDep
+    } else if (SystemScriptInfo.isMultiSignCodeHash(lockClass.codeHash)) {
       cellDep = await SystemScriptInfo.getInstance().getMultiSignCellDep(lockClass.codeHash)
     } else {
       cellDep = await SystemScriptInfo.getInstance().getSecpCellDep()
@@ -531,6 +554,12 @@ export class TransactionGenerator {
     const feeInt = BigInt(fee)
     const feeRateInt = BigInt(feeRate)
     const mode = new FeeMode(feeRateInt)
+
+    // A provider-backed lock is not secp, so its cells are not found by the default filter. Asking
+    // for the wrong ones reports "capacity not enough" for a wallet that is holding plenty.
+    const providerLock = lockClass.cellDep
+      ? { codeHash: lockClass.codeHash, hashType: lockClass.hashType, args: lockClass.lockArgs[0] }
+      : undefined
 
     const allInputs: Input[] = await CellsService.gatherAllInputs(
       walletId,
@@ -542,13 +571,19 @@ export class TransactionGenerator {
             multisigConfig.n,
             multisigConfig.lockCodeHash
           )
-        : undefined
+        : providerLock
     )
     if (allInputs.length === 0) {
       throw new CapacityNotEnough()
     }
 
-    const reservedBalance = isBalanceReserved ? BigInt(62_00_000_000) : BigInt(0)
+    // The reserve exists so the wallet can still hold a cell afterwards, so it has to be a cell
+    // under *this* lock: an SLH-DSA lock needs 73 CKB where secp needs 61, and reserving the secp
+    // figure leaves behind an amount that cannot become a cell.
+    const reserveForLock = providerLock
+      ? new Output('0', new Script(lockClass.codeHash, lockClass.lockArgs[0], lockClass.hashType)).minimalCellCapacity()
+      : BigInt(62_00_000_000)
+    const reservedBalance = isBalanceReserved ? reserveForLock : BigInt(0)
 
     const totalCapacity: bigint =
       allInputs.map(input => BigInt(input.capacity || 0)).reduce((result, c) => result + c, BigInt(0)) - reservedBalance
@@ -601,7 +636,15 @@ export class TransactionGenerator {
     changeAddress: string,
     fee: string = '0',
     feeRate: string = '0',
-    lockClass = {
+    lockClass: {
+      lockArgs: string[]
+      codeHash: string
+      hashType: ScriptHashType
+      /** Cell dep for a lock deployed outside the genesis block. Omitted for secp and multisig. */
+      cellDep?: CellDep
+      /** First-witness size in a script group, for fee estimation. Omitted for secp. */
+      witnessSize?: number
+    } = {
       lockArgs: [''],
       codeHash: SystemScriptInfo.SECP_CODE_HASH,
       hashType: ScriptHashType.Type,
@@ -609,7 +652,9 @@ export class TransactionGenerator {
     multisigConfig?: MultisigConfigModel
   ): Promise<Transaction> => {
     let cellDep: CellDep
-    if (SystemScriptInfo.isMultiSignCodeHash(lockClass.codeHash)) {
+    if (lockClass.cellDep) {
+      cellDep = lockClass.cellDep
+    } else if (SystemScriptInfo.isMultiSignCodeHash(lockClass.codeHash)) {
       cellDep = await SystemScriptInfo.getInstance().getMultiSignCellDep(lockClass.codeHash)
     } else {
       cellDep = await SystemScriptInfo.getInstance().getSecpCellDep()
@@ -653,7 +698,10 @@ export class TransactionGenerator {
       TransactionGenerator.CHANGE_OUTPUT_DATA_SIZE,
       append,
       lockClass,
-      multisigConfig ? [multisigConfig] : []
+      multisigConfig ? [multisigConfig] : [],
+      undefined,
+      undefined,
+      lockClass.witnessSize
     )
     const finalFeeInt = BigInt(finalFee)
 

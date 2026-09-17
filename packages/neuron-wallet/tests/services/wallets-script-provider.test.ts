@@ -157,14 +157,45 @@ describe('provider-backed wallets', () => {
       await expect(wallet.checkAndGenerateAddresses()).resolves.toBeUndefined()
     })
 
-    it.each(['getNextAddress', 'getNextChangeAddress', 'getNextReceivingAddresses'] as const)(
-      'refuses %s, which only means something for an HD wallet',
+    it.each(['getNextAddress', 'getNextChangeAddress'] as const)(
+      'answers %s with the one address it owns',
       async method => {
+        // These used to throw, on the reasoning that a "next" address is a gap-limit idea and an
+        // SLH-DSA wallet has no chain to walk. That is true of the name and false of the question:
+        // every caller of these is asking "give me an address of this wallet to receive output or
+        // change", and for this wallet that answer exists and is unambiguous. Throwing turned a
+        // question with a good answer into a wall, and blocked DAO, asset accounts and
+        // anyone-can-pay — each of which surfaced to the user as "this wallet does not support
+        // {name} function".
         const wallet = walletService.get(createPq('pq one').id)
+        identitiesByWallet.set(wallet.id, [identityFor(wallet.id, `0x${'11'.repeat(32)}`)])
 
-        await expect(wallet[method]()).rejects.toThrow(WalletFunctionNotSupported)
+        const address = await wallet[method]()
+
+        expect(address).toEqual(
+          expect.objectContaining({ blake160: `0x${'11'.repeat(32)}`, lockHashType: ScriptHashType.Data1 })
+        )
       }
     )
+
+    it.each(['getNextAddress', 'getNextChangeAddress'] as const)(
+      'refuses %s when the wallet has no identity yet, rather than inventing one',
+      async method => {
+        // Returning undefined would let a caller build a transaction paying change to `undefined`.
+        const wallet = walletService.get(createPq('pq one').id)
+        identitiesByWallet.set(wallet.id, [])
+
+        await expect(wallet[method]()).rejects.toThrow(/identity/i)
+      }
+    )
+
+    it('still refuses getNextReceivingAddresses, which really is gap-limit shaped', async () => {
+      // Unlike the two above, this asks for a *series* of unused addresses to scan. No caller wants
+      // it from this wallet, and answering with a one-element list would misrepresent what it is.
+      const wallet = walletService.get(createPq('pq one').id)
+
+      await expect(wallet.getNextReceivingAddresses()).rejects.toThrow(WalletFunctionNotSupported)
+    })
 
     it('refuses keystore operations', () => {
       const wallet = walletService.get(createPq('pq one').id)

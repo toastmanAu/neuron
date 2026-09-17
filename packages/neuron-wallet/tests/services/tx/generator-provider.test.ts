@@ -143,3 +143,57 @@ describe('generating a transaction for a provider-backed lock', () => {
     expect(tx.fee).toBe('100000')
   })
 })
+
+describe('depositing the whole balance from a provider-backed lock', () => {
+  const gatherAllSpy = jest.spyOn(CellsService, 'gatherAllInputs')
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    getTipHeaderMock.mockResolvedValue({ epoch: '0x0', timestamp: '0x0', number: '0x0' })
+    gatherAllSpy.mockResolvedValue([
+      Input.fromObject({
+        previousOutput: new OutPoint(`0x${'ee'.repeat(32)}`, '0'),
+        since: '0',
+        capacity: '100000000000',
+        lock: PQ_LOCK,
+      }),
+    ])
+  })
+
+  const generate = () =>
+    TransactionGenerator.generateDepositAllTx('w', PQ_ADDRESS, PQ_ADDRESS, true, '0', '1000', {
+      lockArgs: [PQ_LOCK.args],
+      codeHash: PQ_LOCK.codeHash,
+      hashType: PQ_LOCK.hashType,
+      cellDep: PQ_DEP,
+      witnessSize: SLH_DSA_128S_WITNESS,
+    })
+
+  it("gathers the provider's cells, not secp cells", async () => {
+    // Without this the generator asks for cells under the secp code hash, finds none, and reports
+    // "capacity not enough" for a wallet that is holding plenty.
+    await generate().catch(() => {})
+
+    expect(gatherAllSpy).toHaveBeenCalledWith(
+      'w',
+      expect.objectContaining({ codeHash: PQ_LOCK.codeHash, hashType: PQ_LOCK.hashType, args: PQ_LOCK.args })
+    )
+  })
+
+  it("uses the provider's cell dep", async () => {
+    const tx = await generate()
+
+    expect(tx.cellDeps.map(dep => dep.outPoint!.txHash)).toContain(PQ_DEP.outPoint!.txHash)
+  })
+
+  it('reserves enough for a cell under this lock, not for a secp cell', async () => {
+    // The reserve exists so the wallet can still hold a cell afterwards. An SLH-DSA lock needs
+    // 73 CKB where secp needs 61, so reserving the secp figure leaves an amount that cannot
+    // become a cell.
+    const tx = await generate()
+
+    const deposited = BigInt(tx.outputs[0].capacity)
+    const gathered = BigInt('100000000000')
+    expect(gathered - deposited).toBeGreaterThanOrEqual(BigInt(73_00_000_000))
+  })
+})

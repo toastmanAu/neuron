@@ -829,7 +829,10 @@ describe('TransactionSender Test', () => {
           fakeDepositBlockHeader.hash,
           fakeAddress1,
           fee,
-          feeRate
+          feeRate,
+          // A lock class, present only for a provider-backed wallet. Undefined here keeps this
+          // wallet on the secp path, which is what the rest of these arguments assert.
+          undefined
         )
       })
     })

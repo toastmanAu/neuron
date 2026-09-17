@@ -311,13 +311,19 @@ export class HardwareWallet extends Wallet {
  * A wallet whose addresses come from a lock provider rather than from HD secp derivation.
  *
  * It has no extended public key, no keystore and no BIP44 paths: an SLH-DSA wallet is one key pair
- * whose lock script differs per network. The HD-shaped address methods therefore throw
- * `WalletFunctionNotSupported`, the same way a hardware wallet refuses keystore operations — asking
- * an SLH-DSA wallet for its "next change address" is a category error, not a missing feature.
+ * whose lock script differs per network.
  *
- * `getAllAddresses()` returns an empty list rather than throwing, because callers treat it as "what
- * HD addresses does this wallet have" and the honest answer is none. Its real addresses are read
- * through `getScriptIdentities()`, which returns full lock scripts instead of blake160s.
+ * `getNextAddress` and `getNextChangeAddress` answer with that one address. They used to throw, on
+ * the reasoning that a "next" address is a gap-limit idea this wallet has no chain to walk for.
+ * That is true of the name and false of the question: every caller is asking for an address of this
+ * wallet to receive output or change, and here that answer exists and is unambiguous. Throwing
+ * turned a question with a good answer into a wall, and every feature that asks — DAO, asset
+ * accounts, anyone-can-pay — surfaced it to the user as "this wallet does not support {name}
+ * function".
+ *
+ * `getNextReceivingAddresses` still refuses, because it genuinely is gap-limit shaped: it asks for
+ * a series of unused addresses to scan, and answering with one address would misrepresent what this
+ * wallet is.
  */
 export class ScriptProviderWallet extends Wallet {
   public isHardware = (): boolean => false
@@ -348,13 +354,23 @@ export class ScriptProviderWallet extends Wallet {
   // per network, from its stored identity, and callers asking what it owns deserve that answer.
   public getAllAddresses = async (): Promise<AddressInterface[]> => AddressService.getOwnedAddressesByWalletId(this.id)
 
-  public getNextAddress = async (): Promise<AddressInterface | undefined> => {
-    throw new WalletFunctionNotSupported('getNextAddress')
+  /**
+   * The single address this wallet owns on the connected network.
+   *
+   * Throws rather than returning undefined when no identity exists yet: a caller that treats the
+   * result as optional would otherwise build a transaction paying change to `undefined`.
+   */
+  private ownAddress = async (): Promise<AddressInterface> => {
+    const [address] = await AddressService.getOwnedAddressesByWalletId(this.id)
+    if (!address) {
+      throw new Error(`Wallet ${this.id} has no script identity on this network yet`)
+    }
+    return address
   }
 
-  public getNextChangeAddress = async (): Promise<AddressInterface | undefined> => {
-    throw new WalletFunctionNotSupported('getNextChangeAddress')
-  }
+  public getNextAddress = async (): Promise<AddressInterface | undefined> => this.ownAddress()
+
+  public getNextChangeAddress = async (): Promise<AddressInterface | undefined> => this.ownAddress()
 
   public getNextReceivingAddresses = async (): Promise<AddressInterface[]> => {
     throw new WalletFunctionNotSupported('getNextReceivingAddresses')
