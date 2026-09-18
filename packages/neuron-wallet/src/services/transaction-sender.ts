@@ -53,6 +53,7 @@ import CellsService from './cells'
 import ScriptIdentityService from './script-identities'
 import ScriptIdentityModel from '../models/script-identity'
 import resolveInputsForSigning from './tx/resolve-inputs'
+import ScriptDeploymentChecker from './script-deployment-checks'
 import { getDefaultSecretSourceRegistry, SecretSourceRegistry } from './secret-sources'
 import { hd } from '@ckb-lumos/lumos'
 import { getClusterByOutPoint } from '@spore-sdk/core'
@@ -80,13 +81,17 @@ export default class TransactionSender {
 
   private secretSources: SecretSourceRegistry
 
+  private deploymentChecker: ScriptDeploymentChecker
+
   constructor(
     lockProviders: LockProviderRegistry = getDefaultLockProviderRegistry(),
-    secretSources: SecretSourceRegistry = getDefaultSecretSourceRegistry()
+    secretSources: SecretSourceRegistry = getDefaultSecretSourceRegistry(),
+    deploymentChecker: ScriptDeploymentChecker = new ScriptDeploymentChecker()
   ) {
     this.walletService = WalletService.getInstance()
     this.lockProviders = lockProviders
     this.secretSources = secretSources
+    this.deploymentChecker = deploymentChecker
   }
 
   public async sendTx(
@@ -385,6 +390,15 @@ export default class TransactionSender {
       }
 
       const provider = this.lockProviders.getOrThrow(identity.providerId)
+
+      // A signature is only worth anything against the code that will check it. On mainnet this
+      // lock sits behind a Type ID, so the deployed binary can be replaced while the code hash —
+      // and therefore every stored identity and every cell already locked — stays byte for byte
+      // identical. Checked here rather than at the cell-dep site so that nothing is signed against
+      // a script this build has not been verified against. The result is cached, so several groups
+      // under the same provider cost one lookup.
+      await this.deploymentChecker.assertUsableFor(identity.providerId, network)
+
       const metadata = identity.metadata ?? undefined
 
       group[0].witnessArgs = WitnessArgs.fromObject(

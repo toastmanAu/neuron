@@ -6,6 +6,7 @@ const getSecretMock = jest.fn()
 const resolveInputsMock = jest.fn()
 const getCurrentNetworkMock = jest.fn()
 const getWalletMock = jest.fn()
+const assertUsableForMock = jest.fn()
 
 jest.mock('../../../src/services/script-identities', () => ({
   __esModule: true,
@@ -23,6 +24,15 @@ jest.mock('../../../src/services/secret-sources', () => ({
       (...args: unknown[]) =>
         getSecretMock(...args),
   }),
+}))
+jest.mock('../../../src/services/script-deployment-checks', () => ({
+  __esModule: true,
+  default: class {
+    // eslint-disable-next-line class-methods-use-this
+    assertUsableFor(...args: unknown[]) {
+      return assertUsableForMock(...args)
+    }
+  },
 }))
 jest.mock('../../../src/services/networks', () => ({
   __esModule: true,
@@ -180,5 +190,24 @@ describe('TransactionSender with a provider-backed wallet', () => {
     getByWalletIdMock.mockResolvedValue([])
 
     await expect(sender.sign('pq', buildTx(), 'password', false)).rejects.toThrow()
+  })
+
+  it('checks the deployed script before producing a signature', async () => {
+    // The signature is only worth anything against the code that will check it. Mainnet deploys
+    // the lock behind a Type ID, so the binary can be replaced while every lock script — and so
+    // every stored identity — stays byte for byte identical.
+    await sender.sign('pq', buildTx(), 'password', false)
+
+    expect(assertUsableForMock).toHaveBeenCalledWith(
+      'slh-dsa-fips205',
+      expect.objectContaining({ genesisHash: TESTNET_GENESIS_HASH })
+    )
+  }, 120000)
+
+  it('does not sign when the deployed script is not the one this build was verified against', async () => {
+    assertUsableForMock.mockRejectedValueOnce(new Error('the deployed binary has changed'))
+
+    await expect(sender.sign('pq', buildTx(), 'password', false)).rejects.toThrow(/deployed binary has changed/)
+    expect(getSecretMock).not.toHaveBeenCalled()
   })
 })
