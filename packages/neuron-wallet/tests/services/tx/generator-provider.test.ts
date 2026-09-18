@@ -2,8 +2,13 @@ import 'dotenv/config'
 
 const getTipHeaderMock = jest.fn()
 const getGenesisBlockMock = jest.fn()
+const getTransactionMock = jest.fn()
 jest.mock('../../../src/services/rpc-service', () => {
-  return jest.fn().mockImplementation(() => ({ getTipHeader: getTipHeaderMock, getGenesisBlock: getGenesisBlockMock }))
+  return jest.fn().mockImplementation(() => ({
+    getTipHeader: getTipHeaderMock,
+    getGenesisBlock: getGenesisBlockMock,
+    getTransaction: getTransactionMock,
+  }))
 })
 jest.mock('../../../src/services/networks', () => ({
   __esModule: true,
@@ -32,6 +37,7 @@ import Script, { ScriptHashType } from '../../../src/models/chain/script'
 import CellDep, { DepType } from '../../../src/models/chain/cell-dep'
 import OutPoint from '../../../src/models/chain/out-point'
 import Input from '../../../src/models/chain/input'
+import Output from '../../../src/models/chain/output'
 import TransactionSize from '../../../src/models/transaction-size'
 
 const PQ_LOCK = new Script(`0x${'a1'.repeat(32)}`, `0x${'11'.repeat(32)}`, ScriptHashType.Data1)
@@ -270,5 +276,90 @@ describe('sending the whole balance from a provider-backed lock', () => {
     const fee = gathered - sent
     // A 7.9 KB witness at 1000 shannons/KB is ~8000 shannons; a 93 byte one is ~200.
     expect(fee).toBeGreaterThan(BigInt(5000))
+  })
+})
+
+describe('transferring an NFT held under a provider-backed lock', () => {
+  const gatherSpy2 = jest.spyOn(CellsService, 'gatherInputs')
+  const getLiveCellSpy = jest.spyOn(CellsService, 'getLiveCell')
+
+  // 133 CKB is exactly MIN_NFT_CELL_SIZE, so paying the fee from the NFT cell itself would take it
+  // below the floor and the generator falls through to gathering fee inputs — which is the branch
+  // that builds a change output, and the one that used to build it as a secp script.
+  const NFT_CAPACITY = (BigInt(133) * BigInt(10) ** BigInt(8)).toString()
+  const nftOutPoint = new OutPoint(`0x${'77'.repeat(32)}`, '0')
+
+  const lockClass = {
+    lockArgs: [PQ_LOCK.args],
+    codeHash: PQ_LOCK.codeHash,
+    hashType: PQ_LOCK.hashType,
+    cellDep: PQ_DEP,
+    witnessSize: SLH_DSA_128S_WITNESS,
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    getTipHeaderMock.mockResolvedValue({ epoch: '0x0', timestamp: '0x0', number: '0x0' })
+    getTransactionMock.mockResolvedValue({ transaction: { outputsData: ['0x1234'] } })
+    const nftCell = Output.fromObject({
+      capacity: NFT_CAPACITY,
+      lock: PQ_LOCK,
+      type: new Script(`0x${'bb'.repeat(32)}`, '0x', ScriptHashType.Type),
+      data: '0x1234',
+    })
+    getLiveCellSpy.mockResolvedValue(nftCell)
+    gatherSpy2.mockResolvedValue({
+      inputs: [
+        Input.fromObject({
+          previousOutput: new OutPoint(`0x${'ee'.repeat(32)}`, '0'),
+          since: '0',
+          capacity: '50000000000',
+          lock: PQ_LOCK,
+        }),
+      ],
+      capacities: '50000000000',
+      finalFee: '1000000',
+      hasChangeOutput: true,
+      totalSize: 0,
+    })
+  })
+
+  const generate = () =>
+    TransactionGenerator.generateTransferNftTx(
+      'w',
+      nftOutPoint,
+      Output.fromObject({ capacity: NFT_CAPACITY, lock: PQ_LOCK }),
+      PQ_ADDRESS,
+      PQ_ADDRESS,
+      '0',
+      '1000',
+      undefined,
+      lockClass
+    )
+
+  it("carries the provider's cell dep, without which the lock cannot run", async () => {
+    const tx = await generate()
+
+    expect(tx.cellDeps.map(d => d.outPoint!.txHash)).toContain(PQ_DEP.outPoint!.txHash)
+  })
+
+  it("prices the fee inputs with the provider's witness", async () => {
+    await generate()
+
+    // gatherInputs takes the witness size as its 13th argument; secp's 93 bytes would underpay by
+    // the whole size of an SLH-DSA witness and the pool would reject the transaction.
+    expect(gatherSpy2.mock.calls[0][12]).toBe(SLH_DSA_128S_WITNESS)
+  })
+
+  it('pays change back to the provider lock, not a secp script built from its args', async () => {
+    // The change output used to be `SystemScriptInfo.generateSecpScript(toBlake160(changeAddress))`.
+    // For a provider address `toBlake160` throws rather than allowing it, so this path reported
+    // "not short address"; had it not thrown, the change would have gone somewhere unspendable.
+    const tx = await generate()
+
+    const change = tx.outputs[tx.outputs.length - 1]
+    expect(change.lock.codeHash).toBe(PQ_LOCK.codeHash)
+    expect(change.lock.hashType).toBe(PQ_LOCK.hashType)
+    expect(change.lock.args).toBe(PQ_LOCK.args)
   })
 })

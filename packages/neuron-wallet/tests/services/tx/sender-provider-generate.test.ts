@@ -2,6 +2,8 @@ import 'dotenv/config'
 
 const generateTxMock = jest.fn()
 const generateSendingAllTxMock = jest.fn()
+const generateTransferNftTxMock = jest.fn()
+const getLiveCellMock = jest.fn()
 const getByWalletIdMock = jest.fn()
 const getWalletMock = jest.fn()
 const getCurrentNetworkMock = jest.fn()
@@ -10,7 +12,12 @@ jest.mock('../../../src/services/tx/transaction-generator', () => ({
   TransactionGenerator: {
     generateTx: (...a: unknown[]) => generateTxMock(...a),
     generateSendingAllTx: (...a: unknown[]) => generateSendingAllTxMock(...a),
+    generateTransferNftTx: (...a: unknown[]) => generateTransferNftTxMock(...a),
   },
+}))
+jest.mock('../../../src/services/cells', () => ({
+  __esModule: true,
+  default: { getLiveCell: (...a: unknown[]) => getLiveCellMock(...a) },
 }))
 jest.mock('../../../src/services/script-identities', () => ({
   __esModule: true,
@@ -30,6 +37,7 @@ jest.mock('../../../src/services/networks', () => ({
 
 import TransactionSender from '../../../src/services/transaction-sender'
 import ScriptIdentity from '../../../src/models/script-identity'
+import OutPoint from '../../../src/models/chain/out-point'
 import { ScriptHashType } from '../../../src/models/chain/script'
 import { hd } from '@ckb-lumos/lumos'
 import { estimateWitnessSize } from '../../../src/services/lock-providers/slh-dsa/parameter-sets'
@@ -169,5 +177,55 @@ describe('TransactionSender.generateSendingAllTx for a provider-backed wallet', 
     await sendAll()
 
     expect(generateSendingAllTxMock.mock.calls[0][0].lockClass).toBeUndefined()
+  })
+})
+
+describe('TransactionSender NFT transfer for a provider-backed wallet', () => {
+  const sender = new TransactionSender()
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    getCurrentNetworkMock.mockReturnValue(network)
+    getWalletMock.mockReturnValue({ isHardware: () => false, getLockProviderId: () => 'slh-dsa-fips205' })
+    getByWalletIdMock.mockResolvedValue([identity])
+    getLiveCellMock.mockResolvedValue({ capacity: '13300000000', lock: {}, type: {}, data: '0x' })
+    generateTransferNftTxMock.mockResolvedValue({ hash: '0xdead' })
+  })
+
+  const transfer = () =>
+    sender.generateTransferNftTx('pq', new OutPoint(`0x${'77'.repeat(32)}`, '0'), 'ckt1qq-to', '0', '1000')
+
+  it("passes the provider's lock, so the NFT cell can actually be spent", async () => {
+    await transfer()
+
+    const args = generateTransferNftTxMock.mock.calls[0]
+    const lockClass = args[args.length - 1]
+    expect(lockClass).toMatchObject({
+      codeHash: TESTNET_CODE_HASH,
+      hashType: ScriptHashType.Data1,
+      witnessSize: estimateWitnessSize('SLH-DSA-SHA2-128s'),
+    })
+  })
+
+  it('sends change to the wallet own address', async () => {
+    await transfer()
+
+    // Argument 5 is changeAddress. Passing an HD change address here would throw at
+    // `AddressParser.toBlake160`, which refuses a non-secp address.
+    expect(generateTransferNftTxMock.mock.calls[0][4]).toBe('ckt1qq-pq-address')
+  })
+
+  it('leaves a legacy wallet with no lock class', async () => {
+    getWalletMock.mockReturnValue({
+      isHardware: () => false,
+      getLockProviderId: () => undefined,
+      getNextChangeAddress: async () => ({ address: 'ckt1q-legacy-change' }),
+    })
+
+    await transfer()
+
+    const args = generateTransferNftTxMock.mock.calls[0]
+    expect(args[args.length - 1]).toBeUndefined()
+    expect(args[4]).toBe('ckt1q-legacy-change')
   })
 })

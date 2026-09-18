@@ -861,7 +861,8 @@ export default class TransactionSender {
     fee: string = '0',
     feeRate: string = '0'
   ): Promise<Transaction> => {
-    const changeAddress: string = await this.getChangeAddress()
+    const provider = await this.providerLockClassFor(walletId)
+    const changeAddress: string = provider ? provider.changeAddress : await this.getChangeAddress()
     const nftCellOutput = await CellsService.getLiveCell(new OutPoint(outPoint.txHash, outPoint.index))
     if (!nftCellOutput) {
       throw new CellIsNotYetLive()
@@ -874,7 +875,9 @@ export default class TransactionSender {
       receiveAddress,
       changeAddress,
       fee,
-      feeRate
+      feeRate,
+      undefined,
+      provider?.lockClass
     )
 
     return tx
@@ -887,7 +890,8 @@ export default class TransactionSender {
     fee: string = '0',
     feeRate: string = '0'
   ): Promise<Transaction> => {
-    const changeAddress: string = await this.getChangeAddress()
+    const provider = await this.providerLockClassFor(walletId)
+    const changeAddress: string = provider ? provider.changeAddress : await this.getChangeAddress()
     const nftCellOutput = await CellsService.getLiveCell(new OutPoint(outPoint.txHash, outPoint.index))
     if (!nftCellOutput) {
       throw new CellIsNotYetLive()
@@ -919,7 +923,8 @@ export default class TransactionSender {
       changeAddress,
       fee,
       feeRate,
-      [assetAccountInfo.getSporeInfos()[0].cellDep].concat(clusterDep ?? [])
+      [assetAccountInfo.getSporeInfos()[0].cellDep].concat(clusterDep ?? []),
+      provider?.lockClass
     )
 
     return tx

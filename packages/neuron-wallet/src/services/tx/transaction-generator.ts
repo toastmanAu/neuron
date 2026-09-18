@@ -55,14 +55,29 @@ export class TransactionGenerator {
     changeAddress: string,
     fee: string = '0',
     feeRate: string = '0',
-    nftDeps?: CellDep[]
+    nftDeps?: CellDep[],
+    /**
+     * The lock the NFT is held under, when it is not secp.
+     *
+     * Without it this spends a provider-backed cell with the secp cell dep (so the lock cannot run),
+     * prices the transaction as though the witness were 93 bytes, and pays change to a secp script
+     * built from the provider's args — a lock nobody holds the key for.
+     */
+    lockClass?: {
+      lockArgs: string[]
+      codeHash: string
+      hashType: ScriptHashType
+      cellDep?: CellDep
+      witnessSize?: number
+    }
   ) => {
     // defaults to the mNFT cell dep
     const assetAccount = new AssetAccountInfo()
     const nftCellDep = assetAccount.getNftInfo().cellDep
     nftDeps = nftDeps ?? [nftCellDep]
 
-    const secpCellDep = await SystemScriptInfo.getInstance().getSecpCellDep()
+    // The dep for the lock being spent: the provider's when there is one, secp otherwise.
+    const secpCellDep = lockClass?.cellDep ?? (await SystemScriptInfo.getInstance().getSecpCellDep())
     const op = new OutPoint(outPoint.txHash, outPoint.index)
     const nftCell = await CellsService.getLiveCell(op)
 
@@ -137,7 +152,12 @@ export class TransactionGenerator {
       baseSize,
       TransactionGenerator.CHANGE_OUTPUT_SIZE,
       TransactionGenerator.CHANGE_OUTPUT_DATA_SIZE,
-      append
+      append,
+      lockClass ? { codeHash: lockClass.codeHash, hashType: lockClass.hashType } : undefined,
+      undefined,
+      undefined,
+      undefined,
+      lockClass?.witnessSize
     )
     const finalFeeInt = BigInt(finalFee)
 
@@ -150,12 +170,15 @@ export class TransactionGenerator {
 
     // change
     if (hasChangeOutput) {
-      const changeBlake160: string = AddressParser.toBlake160(changeAddress)
       const changeCapacity = BigInt(capacities) - finalFeeInt
+      // Taken whole for a provider lock. Rebuilding it as a secp script from the address, the way
+      // the secp branch does, would pay change to a lock nobody holds the key for —
+      // `AddressParser.toBlake160` refuses a non-secp address rather than allowing that.
+      const changeLock = lockClass
+        ? new Script(lockClass.codeHash, lockClass.lockArgs[0], lockClass.hashType)
+        : SystemScriptInfo.generateSecpScript(AddressParser.toBlake160(changeAddress))
 
-      const changeOutput = new Output(changeCapacity.toString(), SystemScriptInfo.generateSecpScript(changeBlake160))
-
-      tx.addOutput(changeOutput)
+      tx.addOutput(new Output(changeCapacity.toString(), changeLock))
     }
 
     return tx
@@ -349,9 +372,7 @@ export class TransactionGenerator {
     // provider wallet's cells are in the ordinary output table, so that branch finds nothing and
     // the wallet reports an empty balance. Code hash and hash type alone take the walletId branch,
     // which already resolves provider identities by lock hash.
-    const providerLock = lockClass?.cellDep
-      ? { codeHash: lockClass.codeHash, hashType: lockClass.hashType }
-      : undefined
+    const providerLock = lockClass?.cellDep ? { codeHash: lockClass.codeHash, hashType: lockClass.hashType } : undefined
     const allInputs: Input[] = await CellsService.gatherAllInputs(
       walletID,
       multisigConfig
