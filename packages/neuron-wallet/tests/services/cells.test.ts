@@ -15,6 +15,8 @@ import TransactionEntity from '../../src/database/chain/entities/transaction'
 import TransactionSize from '../../src/models/transaction-size'
 import TransactionFee from '../../src/models/transaction-fee'
 import Script, { ScriptHashType } from '../../src/models/chain/script'
+import ScriptIdentityEntity from '../../src/database/chain/entities/script-identity'
+import ScriptIdentity from '../../src/models/script-identity'
 import { TransactionStatus } from '../../src/models/chain/transaction'
 import Transaction from '../../src/models/chain/transaction'
 import Output from '../../src/models/chain/output'
@@ -272,6 +274,54 @@ describe('CellsService', () => {
       let balance = BigInt(0)
       balanceInfo.liveBalances.forEach(v => (balance += BigInt(v)))
       expect(balance.toString()).toEqual((100 + 2222).toString())
+    })
+
+    it('counts the balance of a provider-backed wallet, which has no HD addresses', async () => {
+      // Observed on testnet: a faucet paid 100,000 CKB to a quantum-resistant wallet's lock, the
+      // cell was synced and stored live in this very table, and the wallet showed zero. The balance
+      // query selected lockArgs from hd_public_key_info, and a provider-backed wallet has no rows
+      // there at all, so the subquery was empty and nothing matched.
+      const pqWalletId = 'pq-wallet'
+      const pqLock = new Script(`0x${'a1'.repeat(32)}`, `0x${'b2'.repeat(32)}`, ScriptHashType.Data1)
+      const pq = { lockScript: pqLock, lockHash: pqLock.computeHash() }
+
+      await getConnection()
+        .getRepository(ScriptIdentityEntity)
+        .save(
+          ScriptIdentityEntity.fromModel(
+            ScriptIdentity.fromObject({
+              walletId: pqWalletId,
+              providerId: 'slh-dsa-fips205',
+              addressType: 0,
+              addressIndex: 0,
+              address: 'ckt1qq',
+              lockCodeHash: pqLock.codeHash,
+              lockHashType: pqLock.hashType,
+              lockArgs: pqLock.args,
+              derivationPath: `vault:${pqWalletId}`,
+              publicKey: `0x${'cd'.repeat(32)}`,
+              metadata: { parameterSet: 'SLH-DSA-SHA2-128s' },
+            })
+          )
+        )
+      await createCell('10000000000000', OutputStatus.Live, false, null, pq)
+
+      const balanceInfo = await CellsService.getBalancesByWalletId(pqWalletId)
+      let balance = BigInt(0)
+      balanceInfo.liveBalances.forEach(v => (balance += BigInt(v)))
+
+      expect(balance.toString()).toEqual('10000000000000')
+    })
+
+    it("does not credit one wallet with another wallet identity's cells", async () => {
+      const pqLock = new Script(`0x${'a1'.repeat(32)}`, `0x${'b2'.repeat(32)}`, ScriptHashType.Data1)
+      await createCell('999', OutputStatus.Live, false, null, { lockScript: pqLock })
+
+      const balanceInfo = await CellsService.getBalancesByWalletId('someone-else')
+      let balance = BigInt(0)
+      balanceInfo.liveBalances.forEach(v => (balance += BigInt(v)))
+
+      expect(balance.toString()).toEqual('0')
     })
 
     it(`get alice's balance`, async () => {

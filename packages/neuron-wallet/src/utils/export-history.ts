@@ -34,7 +34,7 @@ const exportHistory = async ({ walletID, filePath }: { walletID: string; filePat
   })
   await wsPromises.write(`${headers.map(label => t(`export-transactions.column.${label}`))}\n`)
 
-  const allAddresses = await AddressService.getAddressesByWalletId(walletID)
+  const allAddresses = await AddressService.getOwnedAddressesByWalletId(walletID)
 
   const addresses = allAddresses.map(addr => addr.address)
   const PAGE_SIZE = 100

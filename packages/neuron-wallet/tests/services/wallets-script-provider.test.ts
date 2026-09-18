@@ -18,6 +18,18 @@ jest.doMock('../../src/services/addresses', () => ({
   getUnusedReceivingAddressesByWalletId: jest.fn(),
   getFirstAddressByWalletId: jest.fn(),
   getAddressesByWalletId: jest.fn().mockResolvedValue([]),
+  // Ownership, as opposed to HD derivation: an identity-backed wallet owns its identities.
+  getOwnedAddressesByWalletId: async (walletId: string) =>
+    (identitiesByWallet.get(walletId) ?? []).map((identity: any) => ({
+      walletId,
+      address: identity.address,
+      blake160: identity.lockArgs,
+      lockCodeHash: identity.lockCodeHash,
+      lockHashType: identity.lockHashType,
+      addressType: identity.addressType,
+      addressIndex: identity.addressIndex,
+      path: identity.derivationPath ?? '',
+    })),
 }))
 
 import WalletService, { ScriptProviderWallet } from '../../src/services/wallets'
@@ -119,12 +131,22 @@ describe('provider-backed wallets', () => {
       expect(identities[0].lockArgs).toBe(`0x${'11'.repeat(32)}`)
     })
 
-    it('reports no HD addresses, because it has none', async () => {
-      // Honest rather than convenient: an SLH-DSA wallet has no blake160-shaped address, and
-      // inventing one would feed a secp script into every consumer that reads that field.
+    it('reports the address it owns, naming the lock it belongs to', async () => {
+      // This assertion replaces one requiring an empty list. The reasoning then was that an SLH-DSA
+      // wallet has no blake160-shaped address and inventing one would feed a secp script into every
+      // consumer reading that field. The concern was real; the answer was wrong. Reporting nothing
+      // made the wallet invisible to every caller asking what it owns, which is how a funded wallet
+      // came to show a zero balance. An address now names its own lock, so a consumer can tell what
+      // it is instead of assuming secp — which removes the hazard the empty list was avoiding.
       const wallet = walletService.get(createPq('pq one').id)
+      identitiesByWallet.set(wallet.id, [identityFor(wallet.id, `0x${'11'.repeat(32)}`)])
 
-      await expect(wallet.getAllAddresses()).resolves.toEqual([])
+      const owned = await wallet.getAllAddresses()
+
+      expect(owned).toHaveLength(1)
+      expect(owned[0]).toEqual(
+        expect.objectContaining({ blake160: `0x${'11'.repeat(32)}`, lockHashType: ScriptHashType.Data1 })
+      )
     })
 
     it('generating HD addresses is a no-op rather than an error', async () => {

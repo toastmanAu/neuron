@@ -17,7 +17,7 @@ export default class TransactionsController {
   ): Promise<Controller.Response<PaginationResult<Transaction> & Controller.Params.TransactionsByKeywords>> {
     const { pageNo = 1, pageSize = 15, keywords = '', walletID = '', sort, direction } = params
 
-    const addresses = (await AddressesService.getAddressesByWalletId(walletID)).map(addr => addr.address)
+    const addresses = (await AddressesService.getOwnedAddressesByWalletId(walletID)).map(addr => addr.address)
 
     const transactions = await TransactionsService.getAllByAddresses(
       { walletID, pageNo, pageSize, addresses, sort, direction },
@@ -60,7 +60,9 @@ export default class TransactionsController {
       throw new CurrentWalletNotSet()
     }
 
-    const lockArgs: string[] = (await AddressesService.getAddressesByWalletId(wallet.id)).map(addr => addr.blake160)
+    const lockArgs: string[] = (await AddressesService.getOwnedAddressesByWalletId(wallet.id)).map(
+      addr => addr.blake160
+    )
 
     const outputCapacities: bigint = transaction
       .outputs!.filter(o => lockArgs.includes(o.lock.args))

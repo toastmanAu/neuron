@@ -66,7 +66,7 @@ export default class CellManagement {
     // check wallet password
     const currentWallet = WalletService.getInstance().getCurrent()
     if (!currentWallet) throw new CurrentWalletNotSet()
-    const addresses = new Set((await AddressService.getAddressesByWalletId(currentWallet.id)).map(v => v.address))
+    const addresses = new Set((await AddressService.getOwnedAddressesByWalletId(currentWallet.id)).map(v => v.address))
     const isMainnet = NetworksService.getInstance().isMainnet()
     if (!lockScripts.every(v => addresses.has(scriptToAddress(v, isMainnet)))) throw new AddressNotFound()
     await SignMessage.sign({

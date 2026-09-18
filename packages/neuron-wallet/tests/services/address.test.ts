@@ -8,6 +8,9 @@ import Transaction from '../../src/database/chain/entities/transaction'
 import { TransactionStatus } from '../../src/models/chain/transaction'
 import { when } from 'jest-when'
 import HdPublicKeyInfo from '../../src/database/chain/entities/hd-public-key-info'
+import ScriptIdentityEntity from '../../src/database/chain/entities/script-identity'
+import ScriptIdentityModel from '../../src/models/script-identity'
+import Script, { ScriptHashType } from '../../src/models/chain/script'
 import { closeConnection, getConnection, initConnection } from '../setupAndTeardown'
 import { NetworkType } from '../../src/models/network'
 import WalletService from '../../src/services/wallets'
@@ -117,6 +120,143 @@ describe('integration tests for AddressService', () => {
 
   beforeEach(() => {
     notifyAddressCreatedStub.mockReset()
+  })
+
+  describe('balances for provider-backed wallets', () => {
+    beforeAll(async () => {
+      await initConnection()
+    })
+
+    afterAll(async () => {
+      await closeConnection()
+    })
+
+    beforeEach(async () => {
+      const connection = getConnection()
+      await connection.synchronize(true)
+    })
+
+    it('lists what a wallet owns, HD addresses and identities alike', async () => {
+      const walletId = 'mixed-wallet'
+      const lock = Script.fromObject({
+        codeHash: `0x${'a1'.repeat(32)}`,
+        hashType: ScriptHashType.Data1,
+        args: `0x${'b2'.repeat(32)}`,
+      })
+      await getConnection()
+        .getRepository(ScriptIdentityEntity)
+        .save(
+          ScriptIdentityEntity.fromModel(
+            ScriptIdentityModel.fromObject({
+              walletId,
+              providerId: 'slh-dsa-fips205',
+              addressType: hd.AddressType.Receiving,
+              addressIndex: 0,
+              address: 'ckt1qqpq',
+              lockCodeHash: lock.codeHash,
+              lockHashType: lock.hashType,
+              lockArgs: lock.args,
+              derivationPath: `vault:${walletId}`,
+              publicKey: `0x${'cd'.repeat(32)}`,
+              metadata: { parameterSet: 'SLH-DSA-SHA2-128s' },
+            })
+          )
+        )
+
+      const owned = await AddressService.getOwnedAddressesByWalletId(walletId)
+
+      expect(owned).toHaveLength(1)
+      // The entry names its own lock, so a consumer need not assume secp to work out what it is.
+      expect(owned[0]).toEqual(
+        expect.objectContaining({ lockCodeHash: lock.codeHash, lockHashType: lock.hashType, blake160: lock.args })
+      )
+    })
+
+    it('keeps HD derivation separate from ownership', async () => {
+      // `getAddressesByWalletId` answers which HD addresses were derived, and gap-limit scanning
+      // depends on that being only HD. Widening it was tried and broke unused-address detection.
+      const walletId = 'mixed-wallet'
+      const lock = Script.fromObject({
+        codeHash: `0x${'a1'.repeat(32)}`,
+        hashType: ScriptHashType.Data1,
+        args: `0x${'b2'.repeat(32)}`,
+      })
+      await getConnection()
+        .getRepository(ScriptIdentityEntity)
+        .save(
+          ScriptIdentityEntity.fromModel(
+            ScriptIdentityModel.fromObject({
+              walletId,
+              providerId: 'slh-dsa-fips205',
+              addressType: hd.AddressType.Receiving,
+              addressIndex: 0,
+              address: 'ckt1qqpq',
+              lockCodeHash: lock.codeHash,
+              lockHashType: lock.hashType,
+              lockArgs: lock.args,
+              derivationPath: `vault:${walletId}`,
+              publicKey: `0x${'cd'.repeat(32)}`,
+              metadata: { parameterSet: 'SLH-DSA-SHA2-128s' },
+            })
+          )
+        )
+
+      expect(await AddressService.getAddressesByWalletId(walletId)).toHaveLength(0)
+      expect(await AddressService.getOwnedAddressesByWalletId(walletId)).toHaveLength(1)
+    })
+
+    it('reports the balance of a wallet whose locks come from identities, not HD addresses', async () => {
+      // The sixth place this assumption bit. `getAddressesWithBalancesByWalletId` starts from
+      // hd_public_key_info, which is empty for a provider-backed wallet, so it returned no entries
+      // at all — the renderer sums those entries, so the wallet showed zero while a 100,000 CKB cell
+      // sat live in the database. The loop it starts from also derives each lock hash from the secp
+      // code hash, which would not have matched even if an entry had existed.
+      const walletId = 'pq-wallet'
+      const lock = Script.fromObject({
+        codeHash: `0x${'a1'.repeat(32)}`,
+        hashType: ScriptHashType.Data1,
+        args: `0x${'b2'.repeat(32)}`,
+      })
+
+      await getConnection()
+        .getRepository(ScriptIdentityEntity)
+        .save(
+          ScriptIdentityEntity.fromModel(
+            ScriptIdentityModel.fromObject({
+              walletId,
+              providerId: 'slh-dsa-fips205',
+              addressType: hd.AddressType.Receiving,
+              addressIndex: 0,
+              address: 'ckt1qqpq',
+              lockCodeHash: lock.codeHash,
+              lockHashType: lock.hashType,
+              lockArgs: lock.args,
+              derivationPath: `vault:${walletId}`,
+              publicKey: `0x${'cd'.repeat(32)}`,
+              metadata: { parameterSet: 'SLH-DSA-SHA2-128s' },
+            })
+          )
+        )
+
+      const output = new OutputEntity()
+      output.outPointTxHash = `0x${'ee'.repeat(32)}`
+      output.outPointIndex = '0'
+      output.capacity = '10000000000000'
+      output.lockCodeHash = lock.codeHash
+      output.lockArgs = lock.args
+      output.lockHashType = lock.hashType
+      output.lockHash = lock.computeHash()
+      output.status = OutputStatus.Live
+      output.hasData = false
+      await getConnection().manager.save(output)
+
+      const addresses = await AddressService.getAddressesWithBalancesByWalletId(walletId)
+
+      expect(addresses).toHaveLength(1)
+      expect(addresses[0]).toEqual(
+        expect.objectContaining({ address: 'ckt1qqpq', balance: '10000000000000', blake160: lock.args })
+      )
+    })
   })
 
   describe('Key tests with db', () => {

@@ -5,6 +5,7 @@ import { Indexer as CkbIndexer, CellCollector } from '@ckb-lumos/ckb-indexer'
 import AddressMeta from '../../database/address/meta'
 import { Address } from '../../models/address'
 import IndexerCacheService from './indexer-cache-service'
+import { providerIdentitiesByWallet } from './provider-sync-scripts'
 import logger from '../../utils/logger'
 import IndexerTxHashCache from '../../database/chain/entities/indexer-tx-hash-cache'
 
@@ -69,11 +70,26 @@ export abstract class Synchronizer {
     await this.processNextBlockNumberQueue?.drain()
   }
 
+  /**
+   * Wallets whose cached transactions need processing.
+   *
+   * `addressesByWalletId` is built from HD address metadata, so a provider-backed wallet is absent
+   * from it entirely — it has no addresses, its lock comes from a stored identity. Iterating that
+   * map alone meant such a wallet's cached transactions were queued by the indexer pass and then
+   * never consumed: observed on testnet as a committed 100,000 CKB cell that stayed invisible while
+   * `indexer_tx_hash_cache` held its hash with `isProcessed = 0` forever.
+   */
+  protected async walletIdsToProcess(): Promise<string[]> {
+    const fromAddresses = [...this.addressesByWalletId.keys()]
+    const fromIdentities = [...(await providerIdentitiesByWallet()).keys()]
+    return [...new Set([...fromAddresses, ...fromIdentities])]
+  }
+
   protected async getTxHashesWithNextUnprocessedBlockNumber(): Promise<[string | undefined, string[], string[]]> {
     const txHashCachesByNextBlockNumberAndAddress = await Promise.all(
-      [...this.addressesByWalletId.keys()].map(async walletId =>
-        IndexerCacheService.nextUnprocessedTxsGroupedByBlockNumber(walletId)
-      )
+      (
+        await this.walletIdsToProcess()
+      ).map(async walletId => IndexerCacheService.nextUnprocessedTxsGroupedByBlockNumber(walletId))
     )
     const groupedTxHashCaches = txHashCachesByNextBlockNumberAndAddress.flat().reduce((grouped, txHashCache) => {
       if (!grouped.get(txHashCache.blockNumber.toString())) {
@@ -99,9 +115,7 @@ export abstract class Synchronizer {
   }
 
   protected async notifyAndSyncNext(indexerTipNumber: number) {
-    const nextUnprocessedBlockNumber = await IndexerCacheService.nextUnprocessedBlock([
-      ...this.addressesByWalletId.keys(),
-    ])
+    const nextUnprocessedBlockNumber = await IndexerCacheService.nextUnprocessedBlock(await this.walletIdsToProcess())
     if (nextUnprocessedBlockNumber) {
       this.blockTipsSubject.next({
         cacheTipNumber: parseInt(nextUnprocessedBlockNumber),

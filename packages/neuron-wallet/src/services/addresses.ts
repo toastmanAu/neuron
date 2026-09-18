@@ -10,6 +10,7 @@ import AddressParser from '../models/address-parser'
 import { getConnection } from '../database/chain/connection'
 import { TransactionsService } from '../services/tx'
 import CellsService from './cells'
+import ScriptIdentityService from './script-identities'
 import SystemScriptInfo from '../models/system-script-info'
 import Script from '../models/chain/script'
 import HdPublicKeyInfo from '../database/chain/entities/hd-public-key-info'
@@ -390,17 +391,55 @@ export default class AddressService {
       })
   }
 
+  /**
+   * Every address a wallet owns, however it owns it.
+   *
+   * `getAddressesByWalletId` answers a narrower question — which HD addresses were derived — and
+   * that is the right question for address generation, gap-limit scanning and secp signing. It is
+   * the wrong question for anything asking "is this mine": a provider-backed wallet derives no HD
+   * addresses at all, so every caller that used it to mean ownership silently excluded such a
+   * wallet and reported nothing rather than failing. That mistake was found in six separate places
+   * — balances, the indexer pass, the unprocessed-transaction consumer, the application menu, the
+   * balance query and the address list — before it was given a name.
+   *
+   * Callers that mean ownership should use this. Callers that mean HD derivation should not.
+   */
+  public static async getOwnedAddressesByWalletId(walletId: string): Promise<AddressInterface[]> {
+    const [derived, identities] = await Promise.all([
+      AddressService.getAddressesByWalletId(walletId),
+      ScriptIdentityService.getByWalletId(walletId),
+    ])
+
+    return [
+      ...derived,
+      ...identities.map(identity => ({
+        walletId: identity.walletId,
+        address: identity.address,
+        path: identity.derivationPath ?? '',
+        addressType: identity.addressType,
+        addressIndex: identity.addressIndex,
+        // Shown as the address identifier. These locks have no blake160 of a public key; the args
+        // are the identity.
+        blake160: identity.lockArgs,
+        lockCodeHash: identity.lockCodeHash,
+        lockHashType: identity.lockHashType,
+        description: identity.description ?? '',
+      })),
+    ]
+  }
+
   public static async getAddressesWithBalancesByWalletId(walletId: string): Promise<AddressInterface[]> {
-    const addresses = await this.getAddressesByWalletId(walletId)
+    const addresses = await AddressService.getOwnedAddressesByWalletId(walletId)
     const { liveBalances, sentBalances, pendingBalances } = await CellsService.getBalancesByWalletId(walletId)
     const txCountsByLock = await TransactionsService.getTxCountsByWalletId(walletId, {
       codeHash: SystemScriptInfo.SECP_CODE_HASH,
       hashType: SystemScriptInfo.SECP_HASH_TYPE,
     })
     const allAddressesWithBalances = addresses.map(address => {
+      // An HD address is always secp and says nothing; anything else names its own lock.
       const script = Script.fromObject({
-        codeHash: SystemScriptInfo.SECP_CODE_HASH,
-        hashType: SystemScriptInfo.SECP_HASH_TYPE,
+        codeHash: address.lockCodeHash ?? SystemScriptInfo.SECP_CODE_HASH,
+        hashType: address.lockHashType ?? SystemScriptInfo.SECP_HASH_TYPE,
         args: address.blake160,
       })
       const lockHash = script.computeHash()

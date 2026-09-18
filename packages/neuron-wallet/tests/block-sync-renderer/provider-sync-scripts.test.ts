@@ -49,13 +49,33 @@ describe('providerSyncScripts', () => {
     ])
   })
 
-  it('does not touch the database when no wallet is provider backed', async () => {
-    // Every existing installation is in this state; the sync path must be exactly as it was.
+  it('ignores the wallet store, which is unreadable from the sync process', async () => {
+    // This assertion replaces one that required the wallet store to be consulted *before* the
+    // database, to keep the sync path unchanged for installations with no provider-backed wallet.
+    // The intent was right and the mechanism was wrong: the block-sync renderer has no
+    // `electron.app`, so `env` falls back to a temp directory and `WalletService.getAll()` returns
+    // nothing however many wallets exist. A funded SLH-DSA lock was never watched, and its cell was
+    // scanned straight past on a real testnet sync.
+    //
+    // The identity table is the source of truth instead. It is empty unless a provider-backed
+    // wallet has been created, so an existing installation is still unaffected — which is what the
+    // old assertion was actually protecting.
     walletsMock.mockReturnValue([{ id: 'legacy' }])
-    const spy = jest.spyOn(ScriptIdentityService, 'getAll')
+    await ScriptIdentityService.save([identity('pq', `0x${'22'.repeat(32)}`)])
+
+    const scripts = await providerSyncScripts()
+
+    expect(scripts).toHaveLength(1)
+    expect(scripts[0]).toEqual(expect.objectContaining({ walletId: 'pq', scriptType: 'lock' }))
+  })
+
+  it('watches nothing, rather than throwing, before the database is ready', async () => {
+    // Reached from sync paths that also run before a connection exists. Throwing there would break
+    // syncing for every installation, provider-backed or not.
+    const spy = jest.spyOn(ScriptIdentityService, 'getAll').mockRejectedValue(new Error('no connection'))
 
     await expect(providerSyncScripts()).resolves.toEqual([])
-    expect(spy).not.toHaveBeenCalled()
+
     spy.mockRestore()
   })
 

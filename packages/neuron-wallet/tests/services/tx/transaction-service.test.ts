@@ -8,6 +8,8 @@ import { keyInfos } from '../../setupAndTeardown/public-key-info.fixture'
 import accounts from '../../setupAndTeardown/accounts.fixture'
 import transactions from '../../setupAndTeardown/transactions.fixture'
 import HdPublicKeyInfo from '../../../src/database/chain/entities/hd-public-key-info'
+import ScriptIdentityEntity from '../../../src/database/chain/entities/script-identity'
+import ScriptIdentityModel from '../../../src/models/script-identity'
 import TransactionPersistor, { TxSaveType } from '../../../src/services/tx/transaction-persistor'
 import SystemScriptInfo from '../../../src/models/system-script-info'
 import { scriptToAddress } from '../../../src/utils/scriptAndAddress'
@@ -378,6 +380,52 @@ describe('Test TransactionService', () => {
       stubProvider.pageSize = 15
       stubProvider.addresses = ADDRESSES
       stubProvider.searchValue = ''
+    })
+
+    describe('when the wallet owns its locks through identities rather than HD keys', () => {
+      // The seventh place this assumption bit, and the first in raw SQL: every branch of this query
+      // derived ownership from hd_public_key_info, where a provider-backed wallet has no rows. Its
+      // balance was right and its history was empty — a send left the wallet and showed nowhere.
+      const pqWalletId = 'pq-history'
+
+      it('returns the transactions that touch an identity lock', async () => {
+        const identityLock = SystemScriptInfo.generateSecpScript('0x36c329ed630d6ce750712a477543672adab57f4c')
+        await getConnection()
+          .getRepository(ScriptIdentityEntity)
+          .save(
+            ScriptIdentityEntity.fromModel(
+              ScriptIdentityModel.fromObject({
+                walletId: pqWalletId,
+                providerId: 'slh-dsa-fips205',
+                addressType: 0,
+                addressIndex: 0,
+                address: 'ckt1qqpq',
+                lockCodeHash: identityLock.codeHash,
+                lockHashType: identityLock.hashType,
+                lockArgs: identityLock.args,
+                derivationPath: `vault:${pqWalletId}`,
+                publicKey: `0x${'cd'.repeat(32)}`,
+                metadata: { parameterSet: 'SLH-DSA-SHA2-128s' },
+              })
+            )
+          )
+
+        const result = await TransactionService.getAllByAddresses(
+          { ...stubProvider, walletID: pqWalletId, addresses: ['ckt1qqpq'] },
+          ''
+        )
+
+        expect(result.totalCount).toBeGreaterThan(0)
+      })
+
+      it('does not show one wallet the transactions of another', async () => {
+        const result = await TransactionService.getAllByAddresses(
+          { ...stubProvider, walletID: 'owns-nothing', addresses: [] },
+          ''
+        )
+
+        expect(result.totalCount).toBe(0)
+      })
     })
 
     describe('When search with an empty search value', () => {

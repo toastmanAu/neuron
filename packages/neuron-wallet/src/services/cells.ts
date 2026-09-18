@@ -109,13 +109,29 @@ export default class CellsService {
         from
             output
         where
-            output.lockArgs in (
-                select
-                    publicKeyInBlake160
-                from
-                    hd_public_key_info
-                where
-                    walletId = '${walletId}'
+            (
+                output.lockArgs in (
+                    select
+                        publicKeyInBlake160
+                    from
+                        hd_public_key_info
+                    where
+                        walletId = '${walletId}'
+                )
+                OR
+                -- A provider-backed wallet has no rows in hd_public_key_info at all, so the
+                -- subquery above is empty for it and its balance came back as zero while its cells
+                -- sat live in this very table. Its locks live in script_identity instead, matched
+                -- on the whole script rather than on args alone: args are a hash of the parameter
+                -- set and public key, and matching them without the code hash would also match an
+                -- unrelated lock that happened to share them.
+                exists (
+                    select 1 from script_identity si
+                    where si.walletId = '${walletId}'
+                      and si.lockArgs = output.lockArgs
+                      and si.lockCodeHash = output.lockCodeHash
+                      and si.lockHashType = output.lockHashType
+                )
             ) AND
             output.hasData = false AND
             output.typeHash is null

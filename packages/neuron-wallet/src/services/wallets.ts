@@ -344,7 +344,9 @@ export class ScriptProviderWallet extends Wallet {
     return undefined
   }
 
-  public getAllAddresses = async (): Promise<AddressInterface[]> => []
+  // Answering "none" here was the same mistake in miniature: this wallet owns exactly one address
+  // per network, from its stored identity, and callers asking what it owns deserve that answer.
+  public getAllAddresses = async (): Promise<AddressInterface[]> => AddressService.getOwnedAddressesByWalletId(this.id)
 
   public getNextAddress = async (): Promise<AddressInterface | undefined> => {
     throw new WalletFunctionNotSupported('getNextAddress')

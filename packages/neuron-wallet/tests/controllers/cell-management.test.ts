@@ -54,6 +54,8 @@ jest.mock('../../src/services/cells', () => ({
 
 jest.mock('../../src/services/addresses', () => ({
   getAddressesByWalletId: () => getAddressesByWalletIdMock(),
+  // Cell ownership asks what the wallet owns, not what it derived.
+  getOwnedAddressesByWalletId: () => getAddressesByWalletIdMock(),
 }))
 
 jest.mock('../../src/services/sign-message', () => ({

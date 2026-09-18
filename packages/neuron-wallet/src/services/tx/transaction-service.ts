@@ -43,6 +43,28 @@ export enum SearchType {
 
 const DESC = 'decrease'
 
+/**
+ * SQL matching rows of `output` or `input` whose lock the wallet owns.
+ *
+ * The history queries derived ownership from `hd_public_key_info` in sixteen places. A
+ * provider-backed wallet has no rows there, so every one of them returned nothing and its history
+ * stayed empty — while its balance, already taught to look at identities, was correct.
+ *
+ * Identities are matched on the whole script rather than args alone: the args of an SLH-DSA lock
+ * are a hash of its parameter set and public key, and matching them without the code hash would
+ * also match an unrelated lock that happened to share them, including one on another network.
+ */
+const ownsLock = (table: 'output' | 'input', walletParam: string) => `(
+            ${table}.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = ${walletParam})
+            or exists (
+              select 1 from script_identity si
+              where si.walletId = ${walletParam}
+                and si.lockArgs = ${table}.lockArgs
+                and si.lockCodeHash = ${table}.lockCodeHash
+                and si.lockHashType = ${table}.lockHashType
+            )
+          )`
+
 export class TransactionsService {
   public static filterSearchType(value: string) {
     if (value === '') {
@@ -256,9 +278,9 @@ export class TransactionsService {
             )
             INTERSECT
             SELECT transactionHash from (
-              SELECT output.transactionHash FROM output WHERE output.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = @1)
+              SELECT output.transactionHash FROM output WHERE ${ownsLock('output', '@1')}
               UNION
-              SELECT input.transactionHash FROM input WHERE input.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = @1)
+              SELECT input.transactionHash FROM input WHERE ${ownsLock('input', '@1')}
             )
           `,
           [lockHashToSearch, params.walletID]
@@ -273,9 +295,9 @@ export class TransactionsService {
         IN
           (
             SELECT transactionHash from (
-              SELECT output.transactionHash FROM output WHERE output.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId)
+              SELECT output.transactionHash FROM output WHERE ${ownsLock('output', ':walletId')}
               UNION
-              SELECT input.transactionHash FROM input WHERE input.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId)
+              SELECT input.transactionHash FROM input WHERE ${ownsLock('input', ':walletId')}
             )
             WHERE transactionHash = :txHash
           )
@@ -294,9 +316,9 @@ export class TransactionsService {
           .select('tx.hash', 'txHash')
           .where(
             `tx.hash in (
-            select output.transactionHash from output where output.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId)
+            select output.transactionHash from output where ${ownsLock('output', ':walletId')}
             union
-            select input.transactionHash from input where input.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId)
+            select input.transactionHash from input where ${ownsLock('input', ':walletId')}
           )
           AND
             (
@@ -333,13 +355,13 @@ export class TransactionsService {
             `tx.hash in (
             select output.transactionHash from output
               where
-                output.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId) AND
+                ${ownsLock('output', ':walletId')} AND
                 output.lockCodeHash = :lockCodeHash AND
                 output.typeArgs = :tokenID
             union
             select input.transactionHash from input
               where
-                input.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId) AND
+                ${ownsLock('input', ':walletId')} AND
                 input.lockCodeHash = :lockCodeHash AND
                 input.typeArgs = :tokenID
           )`,
@@ -359,9 +381,9 @@ export class TransactionsService {
           .select('tx.hash', 'txHash')
           .where(
             `tx.hash in (
-            select output.transactionHash from output where output.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId)
+            select output.transactionHash from output where ${ownsLock('output', ':walletId')}
             union
-            select input.transactionHash from input where input.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId)
+            select input.transactionHash from input where ${ownsLock('input', ':walletId')}
           )`,
             { walletId: params.walletID }
           )
@@ -394,7 +416,7 @@ export class TransactionsService {
       .where(
         `
         input.transactionHash IN (:...txHashes) AND
-        input.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId)
+        ${ownsLock('input', ':walletId')}
       `,
         {
           txHashes,
@@ -418,7 +440,7 @@ export class TransactionsService {
       .where(
         `
         output.transactionHash IN (:...txHashes) AND
-        output.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId)
+        ${ownsLock('output', ':walletId')}
       `,
         {
           txHashes,
@@ -433,7 +455,7 @@ export class TransactionsService {
       .where(
         `
         input.transactionHash IN (:...txHashes) AND
-        input.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId) AND
+        ${ownsLock('input', ':walletId')} AND
         input.lockCodeHash = :lockCodeHash`,
         {
           txHashes,
@@ -449,7 +471,7 @@ export class TransactionsService {
       .where(
         `
         output.transactionHash IN (:...txHashes) AND
-        output.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId) AND
+        ${ownsLock('output', ':walletId')} AND
         output.lockCodeHash = :lockCodeHash`,
         {
           txHashes,
@@ -466,7 +488,7 @@ export class TransactionsService {
         `
         input.transactionHash IN (:...txHashes) AND
         input.typeHash IS NOT NULL AND
-        input.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId) AND
+        ${ownsLock('input', ':walletId')} AND
         input.typeCodeHash = :nftCodehash`,
         {
           txHashes,
@@ -483,7 +505,7 @@ export class TransactionsService {
         `
         output.transactionHash IN (:...txHashes) AND
         output.typeHash IS NOT NULL AND
-        output.lockArgs in (select publicKeyInBlake160 from hd_public_key_info where walletId = :walletId) AND
+        ${ownsLock('output', ':walletId')} AND
         output.typeCodeHash = :nftCodehash`,
         {
           txHashes,
@@ -699,12 +721,7 @@ export class TransactionsService {
           FROM
             input
           WHERE
-            lockArgs in(
-              SELECT
-                hd_public_key_info.publicKeyInBlake160 FROM hd_public_key_info
-              WHERE
-                walletId = :walletId
-            )
+            ${ownsLock('input', ':walletId')}
             ${lock ? 'AND lockCodeHash = :lockCodeHash AND lockHashType = :lockHashType' : ''}
           UNION
           SELECT
@@ -713,12 +730,7 @@ export class TransactionsService {
           FROM
             output
           WHERE
-            lockArgs in(
-              SELECT
-                hd_public_key_info.publicKeyInBlake160 FROM hd_public_key_info
-              WHERE
-                walletId = :walletId
-            )
+            ${ownsLock('output', ':walletId')}
             ${lock ? 'AND lockCodeHash = :lockCodeHash AND lockHashType = :lockHashType' : ''}
         ) AS cell
         GROUP BY
