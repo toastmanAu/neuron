@@ -244,6 +244,8 @@ export enum LockScriptCategory {
   MULTI_LOCK_TIME = 'MULTI_LOCK_TIME',
   MULTISIG = 'MULTISIG',
   Cheque = 'Cheque',
+  /** A lock this build ships a deployment for, but which is not one of the genesis scripts. */
+  LOCK_PROVIDER = 'LOCK_PROVIDER',
   Unknown = 'Unknown',
 }
 

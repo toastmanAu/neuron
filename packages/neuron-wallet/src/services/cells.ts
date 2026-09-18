@@ -36,6 +36,7 @@ import { bytes } from '@ckb-lumos/lumos/codec'
 import { generateRPC } from '../utils/ckb-rpc'
 import { getClusterById, SporeData, unpackToRawClusterData } from '@spore-sdk/core'
 import NetworksService from './networks'
+import { getDefaultScriptDeploymentRegistry } from '../models/script-deployments'
 import { LOCKTIME_ARGS_LENGTH, MIN_CELL_CAPACITY } from '../utils/const'
 import HdPublicKeyInfo from '../database/chain/entities/hd-public-key-info'
 import CellLocalInfoService from './cell-local-info'
@@ -73,6 +74,15 @@ export enum LockScriptCategory {
   MULTI_LOCK_TIME = 'MULTI_LOCK_TIME',
   MULTISIG = 'MULTISIG',
   Cheque = CustomizedLock.Cheque,
+  /**
+   * A lock this build ships a deployment for but which is not one of the genesis scripts.
+   *
+   * Without it every cell in a quantum-resistant wallet reported `Unknown`, and Cell Management
+   * renders that as the cell's type — so the same cell read "Unknown" there and "CKB" in a secp
+   * wallet. It is a category rather than one provider's name so a second provider needs no further
+   * change here.
+   */
+  LOCK_PROVIDER = 'LOCK_PROVIDER',
   Unknown = CustomizedType.Unknown,
 }
 
@@ -1433,8 +1443,14 @@ export default class CellsService {
         return LockScriptCategory.ANYONE_CAN_PAY
       case SystemScriptInfo.SECP_CODE_HASH:
         return LockScriptCategory.SECP256K1
-      default:
-        return LockScriptCategory.Unknown
+      default: {
+        // Not a genesis script, which does not make it unrecognisable: the deployment registry
+        // knows the locks this build ships, per network. The lookup is by network because the same
+        // lock is deployed under a different code hash on each.
+        const network = NetworksService.getInstance().getCurrent()
+        const deployment = network ? getDefaultScriptDeploymentRegistry().forScript(output.lock, network) : undefined
+        return deployment ? LockScriptCategory.LOCK_PROVIDER : LockScriptCategory.Unknown
+      }
     }
   }
 
