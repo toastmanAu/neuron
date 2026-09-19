@@ -199,6 +199,15 @@ describe('depositing the whole balance from a provider-backed lock', () => {
     expect(tx.cellDeps.map(dep => dep.outPoint!.txHash)).toContain(PQ_DEP.outPoint!.txHash)
   })
 
+  it('prices the witness it will carry, not a 93 byte secp one', async () => {
+    // Same defect as the NFT path, found by looking for it: deposit-max sized its fee with
+    // `secpLockWitness() * keyCount`. A provider witness is kilobytes, so the fee was short by
+    // roughly the size of the witness.
+    const tx = await generate()
+
+    expect(BigInt(tx.fee!)).toBeGreaterThan(BigInt(SLH_DSA_128S_WITNESS))
+  })
+
   it('reserves enough for a cell under this lock, not for a secp cell', async () => {
     // The reserve exists so the wallet can still hold a cell afterwards. An SLH-DSA lock needs
     // 73 CKB where secp needs 61, so reserving the secp figure leaves an amount that cannot
@@ -361,5 +370,66 @@ describe('transferring an NFT held under a provider-backed lock', () => {
     expect(change.lock.codeHash).toBe(PQ_LOCK.codeHash)
     expect(change.lock.hashType).toBe(PQ_LOCK.hashType)
     expect(change.lock.args).toBe(PQ_LOCK.args)
+  })
+})
+
+describe('an NFT large enough to pay its own fee', () => {
+  const getLiveCellSpy2 = jest.spyOn(CellsService, 'getLiveCell')
+  // Well above MIN_NFT_CELL_SIZE, so the generator pays the fee out of the NFT cell and returns
+  // without ever gathering fee inputs. This is the common case and the one a real transfer took.
+  const BIG = (BigInt(3920) * BigInt(10) ** BigInt(8)).toString()
+  const nftOutPoint2 = new OutPoint(`0x${'88'.repeat(32)}`, '0')
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    getTipHeaderMock.mockResolvedValue({ epoch: '0x0', timestamp: '0x0', number: '0x0' })
+    getTransactionMock.mockResolvedValue({ transaction: { outputsData: ['0x' + 'ab'.repeat(3781)] } })
+    getLiveCellSpy2.mockResolvedValue(
+      Output.fromObject({
+        capacity: BIG,
+        lock: PQ_LOCK,
+        type: new Script(`0x${'bb'.repeat(32)}`, '0x', ScriptHashType.Type),
+        data: '0x' + 'ab'.repeat(3781),
+      })
+    )
+  })
+
+  const generate = (lockClass?: object) =>
+    TransactionGenerator.generateTransferNftTx(
+      'w',
+      nftOutPoint2,
+      Output.fromObject({ capacity: BIG, lock: PQ_LOCK }),
+      PQ_ADDRESS,
+      PQ_ADDRESS,
+      '0',
+      '1000',
+      undefined,
+      lockClass as never
+    )
+
+  it('prices the witness it will actually carry', async () => {
+    // Observed on chain: a real transfer paid 140,000 shannons for a 34,017 byte transaction — the
+    // fee was sized against a transaction whose `witnesses` array was still empty, omitting the
+    // 29,881 byte SLH-DSA witness entirely. It was accepted only because the resulting rate still
+    // cleared the pool minimum; at a lower chosen fee rate it would have been rejected.
+    const withLock = await generate({
+      lockArgs: [PQ_LOCK.args],
+      codeHash: PQ_LOCK.codeHash,
+      hashType: PQ_LOCK.hashType,
+      cellDep: PQ_DEP,
+      witnessSize: SLH_DSA_128S_WITNESS,
+    })
+
+    const fee = BigInt(withLock.fee!)
+    // At 1000 shannons/KB a ~7.9 KB witness alone is ~7,900 shannons; without it the whole
+    // transaction prices at well under 5,000.
+    expect(fee).toBeGreaterThan(BigInt(SLH_DSA_128S_WITNESS))
+  })
+
+  it('leaves a secp transfer priced exactly as before', async () => {
+    // No lock class: upstream omits the witness here too, and that is not this change to make.
+    const before = await generate(undefined)
+
+    expect(BigInt(before.fee!)).toBeLessThan(BigInt(SLH_DSA_128S_WITNESS))
   })
 })

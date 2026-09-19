@@ -132,7 +132,12 @@ export class TransactionGenerator {
       witnesses: [],
     })
 
-    const txSize = TransactionSize.tx(tx)
+    // `tx.witnesses` is still empty here, so nothing above accounts for the signature this will
+    // carry. Upstream leaves secp priced that way and this does not change it; a provider witness
+    // is kilobytes rather than 93 bytes, and omitting it under-prices the transaction by its whole
+    // size. Seen on chain: a transfer paid 140,000 shannons for 34,017 bytes, accepted only because
+    // the resulting rate still cleared the pool minimum.
+    const txSize = TransactionSize.tx(tx) + (lockClass?.witnessSize ?? 0)
     tx.fee = TransactionFee.fee(txSize, BigInt(feeRate)).toString()
     const outputCapacity = BigInt(nftCell.capacity) - BigInt(tx.fee)
     // if there is enough capacity left to cover tx fee
@@ -666,10 +671,12 @@ export class TransactionGenerator {
     if (mode.isFeeRateMode()) {
       const lockHashes = new Set(allInputs.map(i => i.lockHash!))
       const keyCount: number = lockHashes.size
+      // One witness per distinct lock. A provider witness is kilobytes where secp's is 93 bytes,
+      // and deposit-max subtracts the fee from the amount deposited, so under-counting here yields
+      // a transaction the pool rejects rather than merely a cheap one.
+      const perLockWitness = lockClass.witnessSize ?? TransactionSize.secpLockWitness() * keyCount
       const txSize: number =
-        TransactionSize.tx(tx) +
-        TransactionSize.secpLockWitness() * keyCount +
-        TransactionSize.emptyWitness() * (allInputs.length - keyCount)
+        TransactionSize.tx(tx) + perLockWitness + TransactionSize.emptyWitness() * (allInputs.length - keyCount)
       finalFee = TransactionFee.fee(txSize, feeRateInt)
     }
 
