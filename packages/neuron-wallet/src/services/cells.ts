@@ -329,9 +329,21 @@ export default class CellsService {
   public static async getCustomizedAssetCells(
     blake160s: string[],
     pageNo: number,
-    pageSize: number
+    pageSize: number,
+    /**
+     * Whole lock scripts this wallet owns that are not secp.
+     *
+     * A provider-backed wallet has no blake160 to match on, so without these its assets are
+     * filtered out and the page reports that it holds none — observed with a Spore NFT that was
+     * visible on chain and in the wallet's own cell list.
+     */
+    providerLocks: Script[] = []
   ): Promise<PaginationResult<Cell>> {
     const blake160Hashes = new Set(blake160s)
+    // Keyed on the whole script: args alone would collide across code hashes.
+    const providerLockKeys = new Set(providerLocks.map(lock => `${lock.codeHash}|${lock.hashType}|${lock.args}`))
+    const ownsLock = (o: OutputEntity) =>
+      blake160Hashes.has(o.lockArgs) || providerLockKeys.has(`${o.lockCodeHash}|${o.lockHashType}|${o.lockArgs}`)
     const multiSignHashes = new Set(blake160s.map(blake160 => Multisig.hash([blake160])))
     const assetAccountInfo = new AssetAccountInfo()
     const chequeLockCodeHash = assetAccountInfo.getChequeInfo().codeHash
@@ -464,7 +476,7 @@ export default class CellsService {
         o.typeCodeHash === nftCodehash ||
         (o.typeCodeHash != null && o.hasData)
       ) {
-        return blake160Hashes.has(o.lockArgs)
+        return ownsLock(o)
       }
     })
 

@@ -1,4 +1,5 @@
 import AddressService from '../services/addresses'
+import ScriptIdentityService from '../services/script-identities'
 import CellsService, { PaginationResult, CustomizedLock } from '../services/cells'
 import Cell from '../models/chain/output'
 import { ServiceHasNoResponse } from '../exceptions'
@@ -11,10 +12,16 @@ export default class CustomizedAssetsController {
   public async getCustomizedAssetCells(
     params: Controller.Params.GetCustomizedAssetCellsParams
   ): Promise<Controller.Response<PaginationResult<Cell>>> {
+    // `getOwnedAddressesByWalletId` includes provider-backed identities, whose `blake160` field
+    // carries the lock's real args rather than a public key hash. Those cannot be matched as
+    // blake160s, so the identities are passed separately as whole lock scripts.
     const addresses = await AddressService.getAddressesByWalletId(params.walletID)
     const blake160s = addresses.map(addr => addr.blake160)
+    const providerLocks = (await ScriptIdentityService.getByWalletId(params.walletID)).map(identity =>
+      identity.lockScript()
+    )
 
-    const result = await CellsService.getCustomizedAssetCells(blake160s, params.pageNo, params.pageSize)
+    const result = await CellsService.getCustomizedAssetCells(blake160s, params.pageNo, params.pageSize, providerLocks)
 
     if (!result) {
       throw new ServiceHasNoResponse('GetCustomizedAssetCells')
